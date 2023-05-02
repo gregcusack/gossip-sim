@@ -14,3 +14,11 @@ A Simulation Framework for Solana's Gossip Protocol
 ## Questions to be answered
 - Do low staked nodes ever get starved (no one pushes to them/not a part of a spanning tree)
 - 
+
+## Configurable Parameters
+- Number of nodes to sim
+- Stake of nodes
+
+
+## Thoughts
+- Need to create two separate modules maybe. One for reading from a URL and one for reading from file
