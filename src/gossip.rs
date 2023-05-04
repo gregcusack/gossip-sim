@@ -2,6 +2,7 @@ use {
     crate::{push_active_set::PushActiveSet, received_cache::ReceivedCache, Error},
     crossbeam_channel::{Receiver, Sender},
     itertools::Itertools,
+    rand::Rng,
     log::{error, info},
     solana_client::{
         rpc_client::RpcClient, rpc_config::RpcGetVoteAccountsConfig,
@@ -39,6 +40,46 @@ impl Node {
 
     pub fn stake(&self) -> u64 {
         self.stake
+    }
+
+    pub fn table(&self) -> &HashMap<CrdsKey, CrdsEntry> {
+        &self.table
+    }
+
+    pub fn num_gossip_rounds(&self) -> usize {
+        self.num_gossip_rounds
+    }
+
+    pub fn run_gossip<R: Rng>(
+        &mut self,
+        rng: &mut R,
+        stakes: &HashMap<Pubkey, u64>,
+    )  {
+        self.rotate_active_set(rng, 6usize, stakes);
+    } 
+
+
+    fn rotate_active_set<R: Rng>(
+        &mut self,
+        rng: &mut R,
+        gossip_push_fanout: usize,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        // Gossip nodes to be sampled for each push active set.
+        // TODO: this should only be a set of entrypoints not all staked nodes.
+        let nodes: Vec<_> = stakes
+            .keys()
+            .copied()
+            .chain(self.table.keys().map(|key| key.origin))
+            .filter(|pubkey| pubkey != &self.pubkey)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let cluster_size = nodes.len();
+        // not the goassip_push_fanout * 3 is equivalent to CRDS_GOSSIP_PUSH_ACTIVE_SET_SIZE in solana
+        // note, here the default is 6*3=18. but in solana it is 6*2=12
+        self.active_set
+            .rotate(rng, gossip_push_fanout * 2, cluster_size, &nodes, stakes, self.pubkey());
     }
 }
 

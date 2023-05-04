@@ -21,4 +21,5 @@ A Simulation Framework for Solana's Gossip Protocol
 
 
 ## Thoughts
-- Need to create two separate modules maybe. One for reading from a URL and one for reading from file
+- [x] Need to create two separate methods maybe. One for reading from a URL and one for reading from file
+- [ ] 

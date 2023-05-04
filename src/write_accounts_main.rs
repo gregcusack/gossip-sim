@@ -2,7 +2,7 @@ use {
     clap::{crate_description, crate_name, App, Arg, ArgMatches, value_t_or_exit},
     log::{error, warn, info},
     gossip_sim::{
-        gossip::{make_gossip_cluster, Node, Packet},
+        gossip::{make_gossip_cluster_from_rpc, Node, Packet},
         API_MAINNET_BETA},
     solana_client::rpc_client::RpcClient,
     crossbeam_channel::{Sender},
@@ -81,7 +81,7 @@ fn main() {
         gossip_sim::get_json_rpc_url(matches.value_of("json_rpc_url").unwrap_or_default());
     info!("json_rpc_url: {}", json_rpc_url);
     let rpc_client = RpcClient::new(json_rpc_url);
-    let nodes: Vec<(Node, crossbeam_channel::Sender<Arc<Packet>>)> = make_gossip_cluster(&rpc_client).unwrap();
+    let nodes: Vec<(Node, crossbeam_channel::Sender<Arc<Packet>>)> = make_gossip_cluster_from_rpc(&rpc_client).unwrap();
 
     // number of accounts to write to file. will write the first N accounts
     let num_nodes: u64 = matches.value_of("number_of_nodes").unwrap_or_default().parse().unwrap();

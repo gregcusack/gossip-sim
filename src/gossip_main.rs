@@ -4,18 +4,20 @@ use {
     gossip_sim::{
         gossip::{make_gossip_cluster_from_rpc, make_gossip_cluster_from_map, Node, Packet},
         API_MAINNET_BETA,
-        Error
+        Error,
     },
     solana_client::rpc_client::RpcClient,
+    solana_sdk::pubkey::Pubkey,
     crossbeam_channel::Sender,
     std::{
-        sync::{Arc}, 
+        sync::{Arc, RwLock, TryLockError}, 
         io::Write, 
         fs::{self, File}, 
         path::Path, 
         str::FromStr,
         collections::HashMap,
         process::exit,
+        time::Instant,
     },
 };
 
@@ -46,6 +48,23 @@ fn parse_matches() -> ArgMatches {
                 .help("set to read in key/stake pairs from yaml. use with --acount-file <path>"),
         )
         .get_matches()
+}
+
+fn run_gossip(
+    nodes: &[RwLock<Node>],
+    stakes: &HashMap<Pubkey, /*stake:*/ u64>,
+) -> Result<(), Error> {
+    let mut rng = rand::thread_rng();
+    for node in nodes {
+        let mut node = match node.try_write() {
+            Ok(node) => node,
+            Err(TryLockError::Poisoned(_)) => return Err(Error::TryLockErrorPoisoned),
+            Err(TryLockError::WouldBlock) => continue,
+        };
+        node.run_gossip(&mut rng, stakes);
+    }
+    
+    Ok(())
 }
 
 fn main() {
@@ -85,11 +104,27 @@ fn main() {
         nodes
     }.unwrap();
 
-    for node in nodes {
-        info!("pubkey, stake: {:?}, {}", node.0.pubkey(), node.0.stake());
+    let (nodes, _): (Vec<_>, Vec<_>) = nodes
+        .into_iter()
+        .map(|(node, sender)| {
+            info!("pubkey, stake: {:?}, {}", node.pubkey(), node.stake());
+            let pubkey = node.pubkey();
+            (node, (pubkey, sender))
+        })
+        .unzip();
 
-    }
+    // TODO: remove unstaked here?!
+    //get all of the stakes here. map node pubkey => stake
+    //this includes unstaked nodes! so i guess Behzad's todo wants to remove unstaked
+    let stakes: HashMap<Pubkey, /*stake:*/ u64> = nodes
+        .iter()
+        .map(|node| (node.pubkey(), node.stake()))
+        .collect();
+    //collect vector of nodes
+    let nodes: Vec<_> = nodes.into_iter().map(RwLock::new).collect();
 
+    let _res = run_gossip(&nodes, &stakes).unwrap();
+    //for each node, let's simulate their PushActiveSet one time.
 
 
 
