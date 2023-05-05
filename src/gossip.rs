@@ -44,8 +44,14 @@ pub struct Cluster {
     // keep track of the order in which each recipient node is reach by its neighbors
     // key is the recipient node
     // value hashmap represents the neighbors of the recipient node as the key
-    // and the value is the order in which each node was reached by its neighbor
-    orders: HashMap<Pubkey, HashMap<Pubkey, Vec<u64>>>,
+    // and the value is the number of hops it took for that node to deliver the message
+    // to the main node.
+    // So A => {B => 4}. Would mean for destination A and A's neighbor B.
+    // It took 4 hops to reach A through B.
+    // So A => {C => 3}. Would mean for dest A and A's neighbor C.
+    // It took 3 hops to reach A through C.
+    // For our next step we would need to PRUNE B.
+    orders: HashMap<Pubkey, HashMap<Pubkey, u64>>,
 }
 
 impl Cluster {
@@ -61,6 +67,7 @@ impl Cluster {
     }
 
 
+
     pub fn print_results(
         self,
     ) {
@@ -74,10 +81,10 @@ impl Cluster {
             info!("recv_pubkey: {:?}", recv_pubkey);
             for (peer, order) in neighbors {
                 info!("neighbor pubkey: {:?}", peer);
-                info!("order: ");
-                for o in order {
-                    info!("{}", o)
-                }
+                info!("order: {}", order);
+                // for o in order {
+                //     info!("{}", o)
+                // }
 
             }
         }
@@ -139,30 +146,20 @@ impl Cluster {
                         // an additional hop
                         self.distances.insert(*neighbor, current_distance + 1);
                         
-                        // Initialize the `orders` hashmap for the neighbor
-                        self.orders.insert(*neighbor, HashMap::new());
-
-                        // add current node to the orders hashmap 
-                        // for this neighbor, it's neighbor it the current node
-                        // and the distances is the distance to the neighbor...don't understand...
-                        self.orders
-                            .get_mut(neighbor)
-                            .unwrap()
-                            .insert(
-                                current_node_pubkey, 
-                                vec![self.distances[neighbor]]
-                            );
                         self.queue.push_back(*neighbor);
-                    } else if self.distances[neighbor] == current_distance + 1 {
-                        // If the neighbor has already been visited and its distance is the same as the current distance + 1,
-                        // add the current node to its `orders` hashmap
-                        self.orders
-                            .get_mut(neighbor)
-                            .unwrap()
-                            .entry(current_node_pubkey)
-                            .or_insert_with(|| vec![])
-                            .push(self.distances[neighbor]);
                     }
+
+                    // Here we track, for specific neighbor, we know that the current node
+                    // has sent a message to the neighbor. So we must note that
+                    // our neighbor has received a message from the current node
+                    // and it took current_distance + 1 hops to get to the neighbor
+                    if !self.orders.contains_key(neighbor) {
+                        self.orders.insert(*neighbor, HashMap::new());
+                    }
+                    self.orders
+                        .get_mut(neighbor)
+                        .unwrap()
+                        .insert(current_node_pubkey, current_distance + 1);
             }
         }
     
