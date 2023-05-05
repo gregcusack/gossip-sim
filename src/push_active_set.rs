@@ -95,6 +95,7 @@ impl PushActiveSet {
         //     min stake of {this node, crds value owner}
         // is equal to `k`. The `entry` maintains set of gossip nodes to
         // actively push to for crds values belonging to this bucket.
+        let mut bucket_index: u64 = 0;
         for (k, entry) in self.0.iter_mut().enumerate() {
             // info!("greg pk: {:?}, PASE len: {}", self_pubkey, entry.0.len());
             let weights: Vec<u64> = buckets
@@ -112,6 +113,8 @@ impl PushActiveSet {
                     bucket.saturating_add(1).saturating_pow(2)
                 })
                 .collect();
+            info!("bucket index: {}", bucket_index);
+            bucket_index += 1;
             entry.rotate(rng, size, num_bloom_filter_items, nodes, &weights, self_pubkey);
         }
         let j = &self.0[0];
@@ -119,7 +122,10 @@ impl PushActiveSet {
     }
 
     fn get_entry(&self, stake: Option<&u64>) -> &PushActiveSetEntry {
-        &self.0[get_stake_bucket(stake)]
+        let bucket = get_stake_bucket(stake);
+        info!("bucket index: {}", bucket);
+        &self.0[bucket]
+        // &self.0[get_stake_bucket(stake)]
     }
 }
 
