@@ -5,7 +5,7 @@ use {
     solana_bloom::bloom::{AtomicBloom, Bloom},
     solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey},
     std::collections::HashMap,
-    log::{info},
+    log::{info, debug},
 };
 
 const NUM_PUSH_ACTIVE_SET_ENTRIES: usize = 25;
@@ -113,17 +113,17 @@ impl PushActiveSet {
                     bucket.saturating_add(1).saturating_pow(2)
                 })
                 .collect();
-            info!("bucket index: {}", bucket_index);
+            debug!("bucket index: {}", bucket_index);
             bucket_index += 1;
             entry.rotate(rng, size, num_bloom_filter_items, nodes, &weights, self_pubkey);
         }
-        let j = &self.0[0];
+        // let j = &self.0[0];
         // info!("greg pk: {:?}, PAS[0].len post: {}", self_pubkey, j.0.len()); //all 18 at this point
     }
 
     fn get_entry(&self, stake: Option<&u64>) -> &PushActiveSetEntry {
         let bucket = get_stake_bucket(stake);
-        info!("bucket index: {}", bucket);
+        debug!("bucket index: {}", bucket);
         &self.0[bucket]
         // &self.0[get_stake_bucket(stake)]
     }
@@ -172,7 +172,7 @@ impl PushActiveSetEntry {
         debug_assert_eq!(nodes.len(), weights.len());
         debug_assert!(weights.iter().all(|&weight| weight != 0u64));
         let shuffle = WeightedShuffle::new("rotate-active-set", weights).shuffle(rng);
-        info!("greg start rotate()");
+        debug!("greg start rotate()");
         // info!("greg pk: {:?} weights, nodes, SAFE.len, size length: {}, {}, {}, {}", self_pubkey, weights.len(), nodes.len(), self.0.len(), size);
         for node in shuffle.map(|k| &nodes[k]) {
             // We intend to discard the oldest/first entry in the index-map.
@@ -189,11 +189,11 @@ impl PushActiveSetEntry {
                 Self::BLOOM_FALSE_RATE,
                 Self::BLOOM_MAX_BITS,
             ));
-            info!("greg pk: {:?} adding node to PASE: {:?}", self_pubkey, node);
+            debug!("greg pk: {:?} adding node to PASE: {:?}", self_pubkey, node);
             bloom.add(node);
             self.0.insert(*node, bloom);
         }
-        info!("greg end rotate()");
+        debug!("greg end rotate()");
         // Drop the oldest entry while preserving the ordering of others.
         // info!("greg pk: {:?} out of loop, self.0.len() > size. remove nodes from SAFE. self.0.len(), size: {}, {}", self_pubkey, self.0.len(), size);
         while self.0.len() > size {

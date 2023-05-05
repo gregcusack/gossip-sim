@@ -97,6 +97,7 @@ fn main() {
         nodes
     }.unwrap();
 
+    info!("Using the following nodes and stakes");
     let (mut nodes, _): (Vec<_>, Vec<_>) = nodes
         .into_iter()
         .map(|(node, sender)| {
@@ -117,7 +118,9 @@ fn main() {
         .collect();
     //collect vector of nodes
 
+    info!("Simulating Gossip and setting active sets. Please wait.....");
     let _res = run_gossip(&mut nodes, &stakes).unwrap();
+    info!("Simulation Complete!");
 
 
     let node_map: HashMap<Pubkey, &Node> = nodes
@@ -128,10 +131,17 @@ fn main() {
     let mut cluster = Cluster::new();
     let origin_pubkey = &nodes[0].pubkey(); //just a temp origin selection
 
-    info!("Origin pubkey: {:?}", origin_pubkey);
+    info!("Calculating the MST for origin: {:?}", origin_pubkey);
     cluster.new_mst(origin_pubkey, &stakes, &node_map);
-    info!("---------------------------");
-    cluster.print_results();
+    info!("Calculation Complete. Printing results...");
+    cluster.print_hops();
+    cluster.print_node_orders();
+
+    let (coverage, stranded_nodes) = cluster.coverage(&stakes);
+    info!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
+    info!("{} nodes are stranded", stranded_nodes);
+
+
 
 
 }

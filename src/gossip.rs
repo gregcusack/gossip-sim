@@ -24,11 +24,6 @@ use {
 pub(crate) const CRDS_UNIQUE_PUBKEY_CAPACITY: usize = 8192;
 const GOSSIP_PUSH_FANOUT: usize = 6;
 
-// pub struct ClusterNode {
-//     pubkey: Pubkey,
-//     distance: u64,
-// }
-
 pub struct Cluster {
     // count: u64,
 
@@ -66,29 +61,38 @@ impl Cluster {
         }
     }
 
+    pub fn coverage(
+        &self,
+        stakes: &HashMap<Pubkey, u64>,
+    ) -> (f64, usize) {
+        debug!("visited len, stakes len: {}, {}", self.visited.len(), stakes.len());
+        (self.visited.len() as f64 / stakes.len() as f64, stakes.len() - self.visited.len())
+    }
 
-
-    pub fn print_results(
-        self,
+    pub fn print_hops(
+        &self,
     ) {
         info!("DISTANCES FROM ORIGIN");
-        for (pubkey, hops) in self.distances {
+        for (pubkey, hops) in &self.distances {
             info!("dest node, hops: ({:?}, {})", pubkey, hops);
         }
-        info!("----------------------------------------------");
-        info!("NODE ORDERS");
-        for (recv_pubkey, neighbors) in self.orders {
-            info!("recv_pubkey: {:?}", recv_pubkey);
-            for (peer, order) in neighbors {
-                info!("neighbor pubkey: {:?}", peer);
-                info!("order: {}", order);
-                // for o in order {
-                //     info!("{}", o)
-                // }
+    }
 
+    // print the order in which a node receives a message from it's inbound peers
+    // A => {B => 4}
+    // A => {C => 3}
+    // A received a message in 4 hops through B
+    // A received a message in 3 hops through C
+    pub fn print_node_orders(
+        &self,
+    ) {
+        info!("NODE ORDERS");
+        for (recv_pubkey, neighbors) in &self.orders {
+            info!("----- dest node, num_inbound: {:?}, {} -----", recv_pubkey, neighbors.len());
+            for (peer, order) in neighbors {
+                info!("neighbor pubkey, order: {:?}, {}", peer, order);
             }
         }
-
     }
 
     fn initize(
@@ -164,62 +168,6 @@ impl Cluster {
         }
     
     }
-
-
-
-
-
-
-    pub fn start_mst(
-        &mut self, 
-        origin_pubkey: &Pubkey,
-        stakes: &HashMap<Pubkey, u64>,
-        node_map: &HashMap<Pubkey, &Node>,
-    ) {
-        info!("In start_mst(). origin pk:");
-        let origin: &Node = node_map.get(origin_pubkey).unwrap();
-        let curr_node = origin;
-        self.visited.insert(curr_node.pubkey());
-        for node_pubkey in origin
-            .active_set
-            .get_nodes(&curr_node.pubkey(), &origin_pubkey, |_| false, stakes)
-            .take(GOSSIP_PUSH_FANOUT) {
-                let node = node_map.get(node_pubkey).unwrap();
-                if !self.visited.contains(node_pubkey) {
-                    self.run_mst(node, origin_pubkey, stakes, node_map);
-                } else {
-                    info!("start_mst: already ran run_mst on node: {:?}", node_pubkey);
-                }
-        }
-    }
-
-    pub fn run_mst(
-        &mut self,
-        current_node: &Node,
-        origin_pubkey: &Pubkey,
-        stakes: &HashMap<Pubkey, u64>,
-        node_map: &HashMap<Pubkey, &Node>,
-    ) {
-        info!("In run_mst(). pk: {:?}", current_node.pubkey());
-        // self.incr_count();
-        // if self.count() > 10u64 {
-        //     return
-        // }
-        self.visited.insert(current_node.pubkey());
-        for node in current_node
-            .active_set
-            .get_nodes(&current_node.pubkey(), &origin_pubkey, |_| false, stakes)
-            .take(GOSSIP_PUSH_FANOUT) {
-                let node = node_map.get(&node).unwrap();
-                if !self.visited.contains(&node.pubkey()) {
-                    self.run_mst(node, origin_pubkey, stakes, node_map)
-                } else {
-                    info!("run_mst: already ran run_mst on node: {:?}", &node.pubkey());
-                }
-        }
-    }
-
-
 }
 
 
