@@ -81,7 +81,7 @@ impl PushActiveSet {
         self_pubkey: Pubkey,
     ) {
         let j = &self.0[0];
-        info!("greg pk: {:?}, PAS[0].len pre: {}", self_pubkey, j.0.len()); // all 0 at this point
+        // info!("greg pk: {:?}, PAS[0].len pre: {}", self_pubkey, j.0.len()); // all 0 at this point
         let num_bloom_filter_items = cluster_size.max(Self::MIN_NUM_BLOOM_ITEMS);
         // Active set of nodes to push to are sampled from these gossip nodes,
         // using sampling probabilities obtained from the stake bucket of each
@@ -96,7 +96,7 @@ impl PushActiveSet {
         // is equal to `k`. The `entry` maintains set of gossip nodes to
         // actively push to for crds values belonging to this bucket.
         for (k, entry) in self.0.iter_mut().enumerate() {
-            info!("greg pk: {:?}, PASE len: {}", self_pubkey, entry.0.len());
+            // info!("greg pk: {:?}, PASE len: {}", self_pubkey, entry.0.len());
             let weights: Vec<u64> = buckets
                 .iter()
                 .map(|&bucket| {
@@ -115,7 +115,7 @@ impl PushActiveSet {
             entry.rotate(rng, size, num_bloom_filter_items, nodes, &weights, self_pubkey);
         }
         let j = &self.0[0];
-        info!("greg pk: {:?}, PAS[0].len post: {}", self_pubkey, j.0.len()); //all 18 at this point
+        // info!("greg pk: {:?}, PAS[0].len post: {}", self_pubkey, j.0.len()); //all 18 at this point
     }
 
     fn get_entry(&self, stake: Option<&u64>) -> &PushActiveSetEntry {
@@ -166,15 +166,16 @@ impl PushActiveSetEntry {
         debug_assert_eq!(nodes.len(), weights.len());
         debug_assert!(weights.iter().all(|&weight| weight != 0u64));
         let shuffle = WeightedShuffle::new("rotate-active-set", weights).shuffle(rng);
-        info!("greg pk: {:?} weights, nodes, SAFE.len, size length: {}, {}, {}, {}", self_pubkey, weights.len(), nodes.len(), self.0.len(), size);
+        info!("greg start rotate()");
+        // info!("greg pk: {:?} weights, nodes, SAFE.len, size length: {}, {}, {}, {}", self_pubkey, weights.len(), nodes.len(), self.0.len(), size);
         for node in shuffle.map(|k| &nodes[k]) {
             // We intend to discard the oldest/first entry in the index-map.
             if self.0.len() > size {
-                info!("greg pk {} self.0.len > size, break!", self_pubkey);
+                // info!("greg pk {} self.0.len > size, break!", self_pubkey);
                 break;
             }
             if self.0.contains_key(node) {
-                info!("greg pk: {:?} self.0.contains node's pubkey. continue.", self_pubkey);
+                // info!("greg pk: {:?} self.0.contains node's pubkey. continue.", self_pubkey);
                 continue;
             }
             let bloom = AtomicBloom::from(Bloom::random(
@@ -186,8 +187,9 @@ impl PushActiveSetEntry {
             bloom.add(node);
             self.0.insert(*node, bloom);
         }
+        info!("greg end rotate()");
         // Drop the oldest entry while preserving the ordering of others.
-        info!("greg pk: {:?} out of loop, self.0.len() > size. remove nodes from SAFE. self.0.len(), size: {}, {}", self_pubkey, self.0.len(), size);
+        // info!("greg pk: {:?} out of loop, self.0.len() > size. remove nodes from SAFE. self.0.len(), size: {}, {}", self_pubkey, self.0.len(), size);
         while self.0.len() > size {
             self.0.shift_remove_index(0);
         }

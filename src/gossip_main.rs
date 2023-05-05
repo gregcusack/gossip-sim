@@ -1,23 +1,20 @@
+use solana_sdk::blake3::Hash;
+
 use {
-    clap::{crate_description, crate_name, App, Arg, ArgMatches, value_t_or_exit},
-    log::{error, warn, info},
+    clap::{crate_description, crate_name, App, Arg, ArgMatches},
+    log::{error, info},
     gossip_sim::{
-        gossip::{make_gossip_cluster_from_rpc, make_gossip_cluster_from_map, Node, Packet},
+        gossip::{make_gossip_cluster_from_rpc, make_gossip_cluster_from_map, Node, Cluster},
         API_MAINNET_BETA,
         Error,
     },
     solana_client::rpc_client::RpcClient,
     solana_sdk::pubkey::Pubkey,
-    crossbeam_channel::Sender,
     std::{
-        sync::{Arc, RwLock, TryLockError}, 
-        io::Write, 
-        fs::{self, File}, 
+        fs::{File}, 
         path::Path, 
-        str::FromStr,
         collections::HashMap,
         process::exit,
-        time::Instant,
     },
 };
 
@@ -51,16 +48,12 @@ fn parse_matches() -> ArgMatches {
 }
 
 fn run_gossip(
-    nodes: &[RwLock<Node>],
+    // nodes: &[RwLock<Node>],
+    nodes: &mut Vec<Node>,
     stakes: &HashMap<Pubkey, /*stake:*/ u64>,
 ) -> Result<(), Error> {
     let mut rng = rand::thread_rng();
     for node in nodes {
-        let mut node = match node.try_write() {
-            Ok(node) => node,
-            Err(TryLockError::Poisoned(_)) => return Err(Error::TryLockErrorPoisoned),
-            Err(TryLockError::WouldBlock) => continue,
-        };
         node.run_gossip(&mut rng, stakes);
     }
     
@@ -104,7 +97,7 @@ fn main() {
         nodes
     }.unwrap();
 
-    let (nodes, _): (Vec<_>, Vec<_>) = nodes
+    let (mut nodes, _): (Vec<_>, Vec<_>) = nodes
         .into_iter()
         .map(|(node, sender)| {
             info!("pubkey, stake: {:?}, {}", node.pubkey(), node.stake());
@@ -112,6 +105,8 @@ fn main() {
             (node, (pubkey, sender))
         })
         .unzip();
+
+    
 
     // TODO: remove unstaked here?!
     //get all of the stakes here. map node pubkey => stake
@@ -121,10 +116,56 @@ fn main() {
         .map(|node| (node.pubkey(), node.stake()))
         .collect();
     //collect vector of nodes
-    let nodes: Vec<_> = nodes.into_iter().map(RwLock::new).collect();
 
-    let _res = run_gossip(&nodes, &stakes).unwrap();
+    let _res = run_gossip(&mut nodes, &stakes).unwrap();
+
+
+    let node_map: HashMap<Pubkey, &Node> = nodes
+        .iter()
+        .map(|node| (node.pubkey(), node))
+        .collect();
+
+    let mut cluster = Cluster::new();
+    let origin_pubkey = &nodes[0].pubkey(); //just a temp origin selection
+
+    info!("Origin pubkey: {:?}", origin_pubkey);
+    cluster.start_mst(origin_pubkey, &stakes, &node_map);
+
+
+
+
+
+
+    // cluster.start_mst(&origin_pubkey.pubkey(), &stakes, &node_map);
+
+    // let node_map: HashMap<&Pubkey, &mut Node> = stakes
+    //     .iter()
+    //     .filter_map(|(pubkey, _)| {
+    //         nodes
+    //         .iter_mut()
+    //         .find(|node| node.pubkey() == *pubkey)
+    //             .map(|node| (pubkey, node))
+    // }).collect();
+
+
+
+    // let nodes: Vec<_> = nodes.into_iter().map(RwLock::new).collect();
+
+    // let mut nodes: &mut Vec<Node> = &mut nodes;
+
+
     //for each node, let's simulate their PushActiveSet one time.
+
+
+
+    // //just grab first node for fun
+    // let origin = nodes[0];
+    // let origin_pase = origin.start_run_mst(&stakes);
+
+    // for peer in origin_pase {
+    //     let node = node_map.get(&peer).unwrap();
+    //     node.run_mst(&stakes, &nodes, &origin);
+    // }
 
 
 
