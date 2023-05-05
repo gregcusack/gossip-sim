@@ -7,7 +7,7 @@ use {
     crossbeam_channel::{Receiver, Sender},
     itertools::Itertools,
     rand::Rng,
-    log::{error, info},
+    log::{debug, info},
     solana_client::{
         rpc_client::RpcClient, rpc_config::RpcGetVoteAccountsConfig,
         rpc_response::RpcVoteAccountStatus,
@@ -102,8 +102,6 @@ impl Cluster {
         for (pubkey, _) in stakes {
             // Initialize the `distances` hashmap with a distance of infinity for each node in the graph
             self.distances.insert(*pubkey, u64::MAX);
-            // self.orders.insert(*pubkey, HashMap::new());
-            // self.orders.insert(*pubkey, vec![vec![]; GOSSIP_PUSH_FANOUT]);
         }
     }
 
