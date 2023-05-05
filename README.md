@@ -21,5 +21,8 @@ A Simulation Framework for Solana's Gossip Protocol
 
 
 ## Thoughts
-- [x] Need to create two separate methods maybe. One for reading from a URL and one for reading from file
-- [ ] 
+- [x] Initialize all node with respective stakes and simulated active_sets
+- [ ] Given a message from an origin and all nodes' stakes and active sets, track a message throughout the network
+- [ ] Determine the minimum number of hops the message takes to reach all nodes in the network
+- [ ] For a given destination node and its neighbors, determine which neighbor was first, second, third, etc to deliver the message
+- [ ] Determine coverage of network. # of nodes Rx message / # of nodes in network.

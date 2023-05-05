@@ -39,13 +39,13 @@ pub struct Cluster {
     queue: VecDeque<Pubkey>,
 
     // keep track of the shortest distance from the starting node to each node in the graph
-    distances: HashMap<Pubkey, usize>,
+    distances: HashMap<Pubkey, u64>,
 
     // keep track of the order in which each recipient node is reach by its neighbors
     // key is the recipient node
     // value hashmap represents the neighbors of the recipient node as the key
     // and the value is the order in which each node was reached by its neighbor
-    orders: HashMap<Pubkey, HashMap<Pubkey, Vec<usize>>>,
+    orders: HashMap<Pubkey, HashMap<Pubkey, Vec<u64>>>,
 }
 
 impl Cluster {
@@ -60,13 +60,6 @@ impl Cluster {
         }
     }
 
-    // fn incr_count(&mut self) {
-    //     self.count += 1;
-    // }
-
-    // fn count(&self) -> u64 {
-    //     self.count
-    // }
 
     pub fn print_results(
         self,
@@ -97,7 +90,7 @@ impl Cluster {
     ) {
         for (pubkey, _) in stakes {
             // Initialize the `distances` hashmap with a distance of infinity for each node in the graph
-            self.distances.insert(*pubkey, usize::MAX);
+            self.distances.insert(*pubkey, u64::MAX);
             // self.orders.insert(*pubkey, HashMap::new());
             // self.orders.insert(*pubkey, vec![vec![]; GOSSIP_PUSH_FANOUT]);
         }
