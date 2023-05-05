@@ -1,0 +1,35 @@
+[package]
+name = "gossip-sim"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "3.1.5", features = ["cargo", "env"] }
+crossbeam-channel = "0.5.7"
+env_logger = "0.10.0"
+indexmap = "1.9.2"
+itertools = "0.10.5"
+log = "0.4.17"
+lru = "0.7.7"
+num_cpus = "1.15.0"
+rand = "0.7.0"
+rayon = "1.7.0"
+solana-bloom = { git = "https://github.com/solana-labs/solana" }
+solana-client = { git = "https://github.com/solana-labs/solana" }
+solana-gossip = { git = "https://github.com/solana-labs/solana" }
+solana-logger = { git = "https://github.com/solana-labs/solana" }
+solana-sdk = { git = "https://github.com/solana-labs/solana" }
+thiserror = "1.0.31"
+serde_yaml = "0.8.24"
+
+
+[dev-dependencies]
+rand_chacha = "0.2.2"
+
+[[bin]]
+name = "gossip-sim"
+path = "src/gossip_main.rs"
+
+[[bin]]
+name = "write-accounts"
+path = "src/write_accounts_main.rs"
