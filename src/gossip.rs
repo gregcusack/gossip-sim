@@ -24,12 +24,17 @@ const GOSSIP_PUSH_FANOUT: usize = 6;
 
 pub struct Cluster {
     count: u64,
+    visited: HashSet<Pubkey>,
 }
 
 impl Cluster {
 
     pub fn new() -> Self {
-        Cluster { count: 0 }
+        Cluster { 
+            count: 0,
+            visited: HashSet::new(),
+        
+        }
     }
 
     fn incr_count(&mut self) {
@@ -41,25 +46,31 @@ impl Cluster {
     }
 
 
+
+
+
+
     pub fn start_mst(
         &mut self, 
         origin_pubkey: &Pubkey,
         stakes: &HashMap<Pubkey, u64>,
         node_map: &HashMap<Pubkey, &Node>,
     ) {
-        info!("In start_mst()");
+        info!("In start_mst(). origin pk:");
         let origin: &Node = node_map.get(origin_pubkey).unwrap();
         let curr_node = origin;
+        self.visited.insert(curr_node.pubkey());
         for node_pubkey in origin
             .active_set
             .get_nodes(&curr_node.pubkey(), &origin_pubkey, |_| false, stakes)
             .take(GOSSIP_PUSH_FANOUT) {
                 let node = node_map.get(node_pubkey).unwrap();
-                self.run_mst(node, origin_pubkey, stakes, node_map);
-
+                if !self.visited.contains(node_pubkey) {
+                    self.run_mst(node, origin_pubkey, stakes, node_map);
+                } else {
+                    info!("start_mst: already ran run_mst on node: {:?}", node_pubkey);
+                }
         }
-
-
     }
 
     pub fn run_mst(
@@ -70,21 +81,22 @@ impl Cluster {
         node_map: &HashMap<Pubkey, &Node>,
     ) {
         info!("In run_mst(). pk: {:?}", current_node.pubkey());
-        self.incr_count();
-        if self.count() > 10u64 {
-            return
-        }
+        // self.incr_count();
+        // if self.count() > 10u64 {
+        //     return
+        // }
+        self.visited.insert(current_node.pubkey());
         for node in current_node
             .active_set
             .get_nodes(&current_node.pubkey(), &origin_pubkey, |_| false, stakes)
             .take(GOSSIP_PUSH_FANOUT) {
                 let node = node_map.get(&node).unwrap();
-                self.run_mst(node, origin_pubkey, stakes, node_map)
+                if !self.visited.contains(&node.pubkey()) {
+                    self.run_mst(node, origin_pubkey, stakes, node_map)
+                } else {
+                    info!("run_mst: already ran run_mst on node: {:?}", &node.pubkey());
+                }
         }
-
-
-
-
     }
 
 
