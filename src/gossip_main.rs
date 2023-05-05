@@ -129,44 +129,9 @@ fn main() {
     let origin_pubkey = &nodes[0].pubkey(); //just a temp origin selection
 
     info!("Origin pubkey: {:?}", origin_pubkey);
-    cluster.start_mst(origin_pubkey, &stakes, &node_map);
-
-
-
-
-
-
-    // cluster.start_mst(&origin_pubkey.pubkey(), &stakes, &node_map);
-
-    // let node_map: HashMap<&Pubkey, &mut Node> = stakes
-    //     .iter()
-    //     .filter_map(|(pubkey, _)| {
-    //         nodes
-    //         .iter_mut()
-    //         .find(|node| node.pubkey() == *pubkey)
-    //             .map(|node| (pubkey, node))
-    // }).collect();
-
-
-
-    // let nodes: Vec<_> = nodes.into_iter().map(RwLock::new).collect();
-
-    // let mut nodes: &mut Vec<Node> = &mut nodes;
-
-
-    //for each node, let's simulate their PushActiveSet one time.
-
-
-
-    // //just grab first node for fun
-    // let origin = nodes[0];
-    // let origin_pase = origin.start_run_mst(&stakes);
-
-    // for peer in origin_pase {
-    //     let node = node_map.get(&peer).unwrap();
-    //     node.run_mst(&stakes, &nodes, &origin);
-    // }
-
+    cluster.new_mst(origin_pubkey, &stakes, &node_map);
+    info!("---------------------------");
+    cluster.print_results();
 
 
 }

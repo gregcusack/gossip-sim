@@ -1,5 +1,7 @@
 use std::path::Iter;
 
+use solana_sdk::blake3::Hash;
+
 use {
     crate::{push_active_set::PushActiveSet, received_cache::ReceivedCache, Error},
     crossbeam_channel::{Receiver, Sender},
@@ -12,7 +14,7 @@ use {
     },
     solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey},
     std::{
-        collections::{HashMap, HashSet},
+        collections::{HashMap, HashSet, VecDeque},
         sync::Arc,
         time::{Instant},
         str::FromStr,
@@ -22,27 +24,155 @@ use {
 pub(crate) const CRDS_UNIQUE_PUBKEY_CAPACITY: usize = 8192;
 const GOSSIP_PUSH_FANOUT: usize = 6;
 
+// pub struct ClusterNode {
+//     pubkey: Pubkey,
+//     distance: u64,
+// }
+
 pub struct Cluster {
-    count: u64,
+    // count: u64,
+
+    // set of nodes that have allready been visited!
     visited: HashSet<Pubkey>,
+
+    // keep track of the nodes that still need to be explored.
+    queue: VecDeque<Pubkey>,
+
+    // keep track of the shortest distance from the starting node to each node in the graph
+    distances: HashMap<Pubkey, usize>,
+
+    // keep track of the order in which each recipient node is reach by its neighbors
+    // key is the recipient node
+    // value hashmap represents the neighbors of the recipient node as the key
+    // and the value is the order in which each node was reached by its neighbor
+    orders: HashMap<Pubkey, HashMap<Pubkey, Vec<usize>>>,
 }
 
 impl Cluster {
 
     pub fn new() -> Self {
         Cluster { 
-            count: 0,
+            // count: 0,
             visited: HashSet::new(),
-        
+            queue: VecDeque::new(),
+            distances: HashMap::new(),
+            orders: HashMap::new(),
         }
     }
 
-    fn incr_count(&mut self) {
-        self.count += 1;
+    // fn incr_count(&mut self) {
+    //     self.count += 1;
+    // }
+
+    // fn count(&self) -> u64 {
+    //     self.count
+    // }
+
+    pub fn print_results(
+        self,
+    ) {
+        info!("DISTANCES FROM ORIGIN");
+        for (pubkey, hops) in self.distances {
+            info!("dest node, hops: ({:?}, {})", pubkey, hops);
+        }
+        info!("----------------------------------------------");
+        info!("NODE ORDERS");
+        for (recv_pubkey, neighbors) in self.orders {
+            info!("recv_pubkey: {:?}", recv_pubkey);
+            for (peer, order) in neighbors {
+                info!("neighbor pubkey: {:?}", peer);
+                info!("order: ");
+                for o in order {
+                    info!("{}", o)
+                }
+
+            }
+        }
+
     }
 
-    fn count(&self) -> u64 {
-        self.count
+    fn initize(
+        &mut self,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        for (pubkey, _) in stakes {
+            // Initialize the `distances` hashmap with a distance of infinity for each node in the graph
+            self.distances.insert(*pubkey, usize::MAX);
+            // self.orders.insert(*pubkey, HashMap::new());
+            // self.orders.insert(*pubkey, vec![vec![]; GOSSIP_PUSH_FANOUT]);
+        }
+    }
+
+    pub fn new_mst(
+        &mut self,
+        origin_pubkey: &Pubkey,
+        stakes: &HashMap<Pubkey, u64>,
+        node_map: &HashMap<Pubkey, &Node>,
+    ) {
+        //initialize BFS setup
+        self.initize(stakes);
+
+        // initialize for origin node
+        self.distances.insert(*origin_pubkey, 0); //initialize beginning node
+        self.queue.push_back(*origin_pubkey);
+        self.visited.insert(*origin_pubkey);
+
+        // going through BFS
+        while !self.queue.is_empty() {
+            // Dequeue the next node from the queue and get its current distance
+            let current_node_pubkey = self.queue.pop_front().unwrap();
+            let current_distance = self.distances[&current_node_pubkey];
+
+            // need to get the actual node itself so we can get it's active_set and PASE
+            let current_node = node_map.get(&current_node_pubkey).unwrap();
+
+            // For each peer of the current node's PASE (limit PUSH_FANOUT), 
+            // update its distance and add it to the queue if it has not been visited
+            for neighbor in current_node
+                .active_set
+                .get_nodes(
+                    &current_node.pubkey(), 
+                    &origin_pubkey, 
+                    |_| false, 
+                    stakes
+                )
+                .take(GOSSIP_PUSH_FANOUT) {
+                    //check if we have visited this node before.
+                    if !self.visited.contains(neighbor) {
+                        // if not, we insert it
+                        self.visited.insert(*neighbor);
+                        //update the distance. saying the neighbor node we are looking at is
+                        // an additional hop from the current node. so it is going to be 
+                        // an additional hop
+                        self.distances.insert(*neighbor, current_distance + 1);
+                        
+                        // Initialize the `orders` hashmap for the neighbor
+                        self.orders.insert(*neighbor, HashMap::new());
+
+                        // add current node to the orders hashmap 
+                        // for this neighbor, it's neighbor it the current node
+                        // and the distances is the distance to the neighbor...don't understand...
+                        self.orders
+                            .get_mut(neighbor)
+                            .unwrap()
+                            .insert(
+                                current_node_pubkey, 
+                                vec![self.distances[neighbor]]
+                            );
+                        self.queue.push_back(*neighbor);
+                    } else if self.distances[neighbor] == current_distance + 1 {
+                        // If the neighbor has already been visited and its distance is the same as the current distance + 1,
+                        // add the current node to its `orders` hashmap
+                        self.orders
+                            .get_mut(neighbor)
+                            .unwrap()
+                            .entry(current_node_pubkey)
+                            .or_insert_with(|| vec![])
+                            .push(self.distances[neighbor]);
+                    }
+            }
+        }
+    
     }
 
 
