@@ -80,7 +80,7 @@ impl PushActiveSet {
         stakes: &HashMap<Pubkey, u64>,
         self_pubkey: Pubkey,
     ) {
-        let j = &self.0[0];
+        // let j: &PushActiveSetEntry = &self.0[0];
         // info!("greg pk: {:?}, PAS[0].len pre: {}", self_pubkey, j.0.len()); // all 0 at this point
         let num_bloom_filter_items = cluster_size.max(Self::MIN_NUM_BLOOM_ITEMS);
         // Active set of nodes to push to are sampled from these gossip nodes,
@@ -211,9 +211,12 @@ fn get_stake_bucket(stake: Option<&u64>) -> usize {
     (bucket as usize).min(NUM_PUSH_ACTIVE_SET_ENTRIES - 1)
 }
 
+
+
 #[cfg(test)]
 mod tests {
     use {super::*, rand::SeedableRng, rand_chacha::ChaChaRng, std::iter::repeat_with};
+
 
     #[test]
     fn test_get_stake_bucket() {
@@ -250,7 +253,7 @@ mod tests {
         stakes.insert(pubkey, rng.gen_range(1, MAX_STAKE));
         let mut active_set = PushActiveSet::default();
         assert!(active_set.0.iter().all(|entry| entry.0.is_empty()));
-        active_set.rotate(&mut rng, 5, CLUSTER_SIZE, &nodes, &stakes);
+        active_set.rotate(&mut rng, 5, CLUSTER_SIZE, &nodes, &stakes, Pubkey::new_unique());
         assert!(active_set.0.iter().all(|entry| entry.0.len() == 5));
         // Assert that for all entries, each filter already prunes the key.
         for entry in &active_set.0 {
@@ -275,7 +278,7 @@ mod tests {
         assert!(active_set
             .get_nodes(&pubkey, other, |_| false, &stakes)
             .eq([13, 18, 16, 0].into_iter().map(|k| &nodes[k])));
-        active_set.rotate(&mut rng, 7, CLUSTER_SIZE, &nodes, &stakes);
+        active_set.rotate(&mut rng, 7, CLUSTER_SIZE, &nodes, &stakes, Pubkey::new_unique());
         assert!(active_set.0.iter().all(|entry| entry.0.len() == 7));
         assert!(active_set
             .get_nodes(&pubkey, origin, |_| false, &stakes)
@@ -308,6 +311,7 @@ mod tests {
             NUM_BLOOM_FILTER_ITEMS,
             &nodes,
             &weights,
+            Pubkey::new_unique(),
         );
         assert_eq!(entry.0.len(), 5);
         let keys = [&nodes[16], &nodes[11], &nodes[17], &nodes[14], &nodes[5]];
@@ -342,15 +346,15 @@ mod tests {
             .into_iter()
             .filter(|&&node| node != nodes[11] && node != nodes[14])));
         // Assert that rotate adds new nodes.
-        entry.rotate(&mut rng, 5, NUM_BLOOM_FILTER_ITEMS, &nodes, &weights);
+        entry.rotate(&mut rng, 5, NUM_BLOOM_FILTER_ITEMS, &nodes, &weights, Pubkey::new_unique());
         let keys = [&nodes[11], &nodes[17], &nodes[14], &nodes[5], &nodes[7]];
         assert!(entry.0.keys().eq(keys));
-        entry.rotate(&mut rng, 6, NUM_BLOOM_FILTER_ITEMS, &nodes, &weights);
+        entry.rotate(&mut rng, 6, NUM_BLOOM_FILTER_ITEMS, &nodes, &weights, Pubkey::new_unique());
         let keys = [
             &nodes[17], &nodes[14], &nodes[5], &nodes[7], &nodes[1], &nodes[13],
         ];
         assert!(entry.0.keys().eq(keys));
-        entry.rotate(&mut rng, 4, NUM_BLOOM_FILTER_ITEMS, &nodes, &weights);
+        entry.rotate(&mut rng, 4, NUM_BLOOM_FILTER_ITEMS, &nodes, &weights, Pubkey::new_unique());
         let keys = [&nodes[5], &nodes[7], &nodes[1], &nodes[13]];
         assert!(entry.0.keys().eq(keys));
     }

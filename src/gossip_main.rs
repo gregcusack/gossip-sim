@@ -45,7 +45,10 @@ fn parse_matches() -> ArgMatches {
         .get_matches()
 }
 
-fn run_gossip(
+const GOSSIP_PUSH_FANOUT: usize = 6;
+
+
+pub fn run_gossip(
     // nodes: &[RwLock<Node>],
     nodes: &mut Vec<Node>,
     stakes: &HashMap<Pubkey, /*stake:*/ u64>,
@@ -114,8 +117,8 @@ fn main() {
         .iter()
         .map(|node| (node.pubkey(), node.stake()))
         .collect();
+    
     //collect vector of nodes
-
     info!("Simulating Gossip and setting active sets. Please wait.....");
     let _res = run_gossip(&mut nodes, &stakes).unwrap();
     info!("Simulation Complete!");
@@ -126,7 +129,7 @@ fn main() {
         .map(|node| (node.pubkey(), node))
         .collect();
 
-    let mut cluster = Cluster::new();
+    let mut cluster: Cluster = Cluster::new(GOSSIP_PUSH_FANOUT);
     let origin_pubkey = &nodes[0].pubkey(); //just a temp origin selection
 
     info!("Calculating the MST for origin: {:?}", origin_pubkey);
