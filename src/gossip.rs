@@ -1,7 +1,3 @@
-use std::path::Iter;
-
-use solana_sdk::blake3::Hash;
-
 use {
     crate::{push_active_set::PushActiveSet, received_cache::ReceivedCache, Error},
     crossbeam_channel::{Receiver, Sender},
@@ -229,41 +225,6 @@ impl Node {
         self.active_set
             .rotate(rng, gossip_push_fanout * 2, cluster_size, &nodes, stakes, self.pubkey());
     }
-
-    pub fn hey (
-        &self,
-        stakes: &HashMap<Pubkey, u64>,
-    ) {
-        let k = self.start_run_mst(stakes);
-
-    }
-
-    pub fn start_run_mst(
-        &self, 
-        stakes: &HashMap<Pubkey, u64>,
-    ) -> Vec<Pubkey> { 
-        // let origin = &self.pubkey();
-        // TODO: not efficient. just a fix for now. copies every pubkey in the PASE and returns it in a vector
-        // it is only GOSSIP_PUSH_FANOUT to copy but still
-        return self
-            .active_set
-            .get_nodes(&self.pubkey(), &&self.pubkey(), |_| false, stakes)
-            .take(GOSSIP_PUSH_FANOUT)
-            .cloned()
-            .collect::<Vec<_>>();
-
-    }
-
-    pub fn run_mst(
-        &mut self, 
-        stakes: &HashMap<Pubkey, u64>,
-        nodes: &Vec<Pubkey>,
-        origin: &Pubkey,
-    ) {
-        info!("hey from node: {:?}", self.pubkey);
-
-    }
-
 
 }
 

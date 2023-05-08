@@ -1,5 +1,3 @@
-use solana_sdk::blake3::Hash;
-
 use {
     clap::{crate_description, crate_name, App, Arg, ArgMatches},
     log::{error, info},

@@ -5,7 +5,7 @@ use {
     solana_bloom::bloom::{AtomicBloom, Bloom},
     solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey},
     std::collections::HashMap,
-    log::{info, debug},
+    log::{debug},
 };
 
 const NUM_PUSH_ACTIVE_SET_ENTRIES: usize = 25;
