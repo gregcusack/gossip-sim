@@ -72,6 +72,45 @@ impl Cluster {
         }
     }
 
+    pub fn get_outbound_degree(
+        &self,
+        src_node: &Pubkey,
+    ) -> usize {
+        self.mst.get(src_node).unwrap().len()
+    }
+
+    pub fn get_num_prunes_by_dest (
+        &self,
+        dst_node: &Pubkey,
+    ) -> Result<usize, ()> {
+        match self.prunes.get(dst_node) {
+            Some(adjacent_nodes) => Ok(adjacent_nodes.len()),
+            None => Err(()),
+        }
+    }
+
+    pub fn prune_exists (
+        &self,
+        dst_node: &Pubkey,
+        src_node: &Pubkey,
+    ) -> Result<bool, ()> {
+        match self.prunes.get(dst_node) {
+            Some(adjacent_nodes) => Ok(adjacent_nodes.contains(src_node)),
+            None => Err(()),
+        }
+    }
+
+    pub fn edge_exists (
+        &self,
+        src_node: &Pubkey,
+        dst_node: &Pubkey,
+    ) -> Result<bool, ()> {
+        match self.mst.get(src_node) {
+            Some(adjacent_nodes) => Ok(adjacent_nodes.contains(dst_node)),
+            None => Err(()),
+        }
+    }
+
     pub fn get_order_key(
         &self,
         dest_node: &Pubkey,
@@ -591,7 +630,55 @@ mod tests {
         // test coverage. should be full coverage with 0 left out nodes
         assert_eq!(cluster.coverage(&stakes), (1f64, 0usize));
 
-        
+        // MST
+        // 5 source
+        assert_eq!(cluster.get_outbound_degree(&nodes[5].pubkey()), 2);
+        assert_eq!(cluster.edge_exists(&nodes[5].pubkey(), &nodes[4].pubkey()), Ok(true)); // 5 -> j
+        assert_eq!(cluster.edge_exists(&nodes[5].pubkey(), &nodes[2].pubkey()), Ok(true)); // 5 -> 3
+
+        // j source
+        assert_eq!(cluster.get_outbound_degree(&nodes[4].pubkey()), 2);
+        assert_eq!(cluster.edge_exists(&nodes[4].pubkey(), &nodes[0].pubkey()), Ok(true)); // j -> M
+        assert_eq!(cluster.edge_exists(&nodes[4].pubkey(), &nodes[3].pubkey()), Ok(true)); // j -> P
+
+        // M source
+        assert_eq!(cluster.get_outbound_degree(&nodes[0].pubkey()), 1);
+        assert_eq!(cluster.edge_exists(&nodes[0].pubkey(), &nodes[1].pubkey()), Ok(true)); // M -> h
+
+        // should never fail if above pass
+        assert_eq!(cluster.edge_exists(&nodes[1].pubkey(), &nodes[0].pubkey()), Err(())); // h -> M should not exist (h not in map)
+        assert_eq!(cluster.edge_exists(&nodes[3].pubkey(), &nodes[5].pubkey()), Err(())); // P -> 5 should not exist (P not in map)
+        assert_eq!(cluster.edge_exists(&nodes[0].pubkey(), &nodes[4].pubkey()), Ok(false)); // M -> j should not exist
+        assert_eq!(cluster.edge_exists(&nodes[4].pubkey(), &nodes[5].pubkey()), Ok(false)); // j -> 5 should not exist
+
+        // PRUNES
+        // 5 dest
+        assert_eq!(cluster.get_num_prunes_by_dest(&nodes[5].pubkey()), Err(())); // 5 should not be in prune list it is the origin
+
+        // j dest
+        assert_eq!(cluster.get_num_prunes_by_dest(&nodes[4].pubkey()), Ok(2)); // j prune P and 3
+        assert_eq!(cluster.prune_exists(&nodes[4].pubkey(), &nodes[3].pubkey()), Ok(true)); // j prune P (p sent dup to j, so it got pruned)
+        assert_eq!(cluster.prune_exists(&nodes[4].pubkey(), &nodes[2].pubkey()), Ok(true)); // j prune 3
+
+        // M dest
+        assert_eq!(cluster.get_num_prunes_by_dest(&nodes[0].pubkey()), Ok(2)); // M prune 3, h
+        assert_eq!(cluster.prune_exists(&nodes[0].pubkey(), &nodes[2].pubkey()), Ok(true)); // M prune 3
+        assert_eq!(cluster.prune_exists(&nodes[0].pubkey(), &nodes[1].pubkey()), Ok(true)); // M prune h
+
+        // 3 dest
+        assert_eq!(cluster.get_num_prunes_by_dest(&nodes[2].pubkey()), Ok(2)); // 3 prune M, P
+        assert_eq!(cluster.prune_exists(&nodes[2].pubkey(), &nodes[0].pubkey()), Ok(true)); // 3 prune M
+        assert_eq!(cluster.prune_exists(&nodes[2].pubkey(), &nodes[3].pubkey()), Ok(true)); // 3 prune P
+
+        // P dest
+        assert_eq!(cluster.get_num_prunes_by_dest(&nodes[3].pubkey()), Ok(1)); // P prune h
+        assert_eq!(cluster.prune_exists(&nodes[3].pubkey(), &nodes[1].pubkey()), Ok(true)); // P prune h
+
+        // Test if connections in MST end up in prunes. shouldn't be any MST edges in prunes
+        assert_eq!(cluster.prune_exists(&nodes[4].pubkey(), &nodes[5].pubkey()), Ok(false)); // MST: j prune 5, no 5->j in mst
+        assert_eq!(cluster.prune_exists(&nodes[0].pubkey(), &nodes[4].pubkey()), Ok(false)); // MST: M prune j, no j->M in mst
+        assert_eq!(cluster.prune_exists(&nodes[1].pubkey(), &nodes[0].pubkey()), Err(())); // MST: h prune M, Err. no M->h in mst. h doesn't prune anyone
+        assert_eq!(cluster.prune_exists(&nodes[5].pubkey(), &nodes[3].pubkey()), Err(()));   // MST: 5 prune P, Err. P->5 doesn't exist
 
     }
 
