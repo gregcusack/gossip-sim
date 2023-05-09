@@ -138,14 +138,12 @@ fn main() {
     cluster.print_hops();
     cluster.print_node_orders();
 
+    info!("Origin Node: {:?}", origin_pubkey);
+    cluster.print_mst();
+    cluster.print_prunes();
+
     let (coverage, stranded_nodes) = cluster.coverage(&stakes);
     info!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
     info!("{} nodes are stranded", stranded_nodes);
-
-    cluster.generate_prunes();
-    
-
-
-
 
 }

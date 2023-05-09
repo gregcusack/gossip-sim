@@ -32,7 +32,8 @@ pub struct Cluster {
     queue: VecDeque<Pubkey>,
 
     // keep track of the shortest distance from the starting node to each node in the graph
-    distances: HashMap<Pubkey, u64>,
+    // dst_node: (hops, rx from)
+    distances: HashMap<Pubkey, (u64, Pubkey)>,
 
     // keep track of the order in which each recipient node is reach by its neighbors
     // key is the recipient node
@@ -46,12 +47,12 @@ pub struct Cluster {
     // For our next step we would need to PRUNE B.
     orders: HashMap<Pubkey, HashMap<Pubkey, u64>>,
 
-    // store the connections from dst_pubkey => (src_pubkey, hops)
-    mst: HashMap<Pubkey, (Pubkey, u64)>,
+    // store the adjacency list the MST. src_pubkey => HashSet<dst_pubkey>
+    mst: HashMap<Pubkey, HashSet<Pubkey>>, 
 
     // stores all of the src nodes for a given dst node that is pruned
     // dst_pubkey => {src_pubkey, hops}
-    prunes: HashMap<Pubkey, Vec<(Pubkey, u64)>>,
+    prunes: HashMap<Pubkey, HashSet<Pubkey>>,
 
 
 }
@@ -109,8 +110,8 @@ impl Cluster {
     pub fn get_distance(
         &self,
         pubkey: &Pubkey,
-    ) -> Option<&u64> {
-        self.distances.get(pubkey)
+    ) -> u64 {
+        self.distances.get(pubkey).unwrap().0
     }
 
     pub fn coverage(
@@ -125,7 +126,7 @@ impl Cluster {
         &self,
     ) {
         info!("DISTANCES FROM ORIGIN");
-        for (pubkey, hops) in &self.distances {
+        for (pubkey, (hops, _)) in &self.distances {
             info!("dest node, hops: ({:?}, {})", pubkey, hops);
         }
     }
@@ -147,13 +148,37 @@ impl Cluster {
         }
     }
 
+    pub fn print_mst(
+        &self,
+    ) {
+        info!("MST: ");
+        for (src, dests) in &self.mst {
+            info!("##### src: {:?} #####", src);
+            for dest in dests {
+                info!("dest: {:?}", dest);
+            }
+        }
+    }
+
+    pub fn print_prunes(
+        &self,
+    ) {
+        info!("PRUNES: ");
+        for (dest, prunes) in &self.prunes {
+            info!("--------- Pruner: {:?} ---------", dest);
+            for prune in prunes {
+                info!("Prunee: {:?}", prune);
+            }
+        }
+    }
+
     fn initialize(
         &mut self,
         stakes: &HashMap<Pubkey, u64>,
     ) {
         for (pubkey, _) in stakes {
             // Initialize the `distances` hashmap with a distance of infinity for each node in the graph
-            self.distances.insert(*pubkey, u64::MAX);
+            self.distances.insert(*pubkey, (u64::MAX, Pubkey::default()));
         }
     }
 
@@ -167,7 +192,7 @@ impl Cluster {
         self.initialize(stakes);
 
         // initialize for origin node
-        self.distances.insert(*origin_pubkey, 0); //initialize beginning node
+        self.distances.insert(*origin_pubkey, (0, Pubkey::default())); //initialize beginning node
         self.queue.push_back(*origin_pubkey);
         self.visited.insert(*origin_pubkey);
 
@@ -175,7 +200,7 @@ impl Cluster {
         while !self.queue.is_empty() {
             // Dequeue the next node from the queue and get its current distance
             let current_node_pubkey = self.queue.pop_front().unwrap();
-            let current_distance = self.distances[&current_node_pubkey];
+            let (current_distance, _) = self.distances[&current_node_pubkey];
 
             // need to get the actual node itself so we can get it's active_set and PASE
             let current_node = node_map.get(&current_node_pubkey).unwrap();
@@ -199,9 +224,54 @@ impl Cluster {
                         //update the distance. saying the neighbor node we are looking at is
                         // an additional hop from the current node. so it is going to be 
                         // an additional hop
-                        self.distances.insert(*neighbor, current_distance + 1);
+                        self.distances.insert(*neighbor, (current_distance + 1, current_node_pubkey));
                         
                         self.queue.push_back(*neighbor);
+
+                        // found a new neighbor for our current node
+                        // add the new neighbor to the current node's adjacency hashset
+                        self.mst
+                                .entry(current_node_pubkey)
+                                .or_insert_with(|| HashSet::<Pubkey>::new())
+                                .insert(*neighbor);
+                    } else { //  have seen neighbor, so compare hops to get to neighbor from what 
+                             //  we've previously seen
+                        // get min number of hops to neighbor that we know of
+                        let (minimum_known_dist, from) = self.distances
+                            .get(neighbor)
+                            .unwrap()
+                            .clone(); 
+
+                        if current_distance + 1 < minimum_known_dist {
+                            // we have found a faster way (fewer hops) to get to the neighbor node
+                            // update distances to have shorter distance to neighbor 
+                            self.distances
+                                .insert(*neighbor, (current_distance + 1, current_node_pubkey));
+
+                            // remove the old from mst.
+                            // fewest hops used to be from "from" => neighbor.
+                            // now it is "current_node" => "neighbor"
+                            self.mst
+                                .get_mut(&from)
+                                .unwrap()
+                                .remove(neighbor);
+
+                            self.mst
+                                .entry(current_node_pubkey)
+                                .or_insert_with(|| HashSet::<Pubkey>::new())
+                                .insert(*neighbor);
+
+
+                        } else {
+                            // since we already know of a quicker way to get to this neighbor
+                            // add the current node to the neighbor's prune list.
+                            // neighbor pruning current node
+                            self.prunes
+                                .entry(*neighbor)
+                                .or_insert_with(|| HashSet::<Pubkey>::new())
+                                .insert(current_node_pubkey);
+                        }
+
                     }
 
                     // Here we track, for specific neighbor, we know that the current node
@@ -220,52 +290,52 @@ impl Cluster {
     
     }
 
-    pub fn generate_prunes(
-        &mut self,
-    ) {
-        for (dst, src_hops_map) in self.orders.iter() {
-            let mut prunes_vec: Vec<(Pubkey, u64)> = Vec::new();
-            let mut mst_src: Option<&Pubkey> = None;
-            let mut min_hops: Option<&u64> = None;
+    // pub fn generate_prunes(
+    //     &mut self,
+    // ) {
+        // for (dst, src_hops_map) in self.orders.iter() {
+        //     let mut prunes_vec: Vec<(Pubkey, u64)> = Vec::new();
+        //     let mut mst_src: Option<&Pubkey> = None;
+        //     let mut min_hops: Option<&u64> = None;
         
-            for (src, hops) in src_hops_map.iter() {
-                if min_hops.is_none() || *hops < *min_hops.unwrap() {
-                    if let Some(old_mst_src) = self.mst.insert(*dst, (*src, *hops)) {
-                        prunes_vec.push(old_mst_src);
-                    }
-                    min_hops = Some(hops);
-                    mst_src = Some(src);
-                } else {
-                    prunes_vec.push((*src, *hops));
-                }
-            }
-            if let Some(mst_src) = mst_src {
-                self.mst.insert(*dst, (*mst_src, *min_hops.unwrap()));
-            }
-            if !prunes_vec.is_empty() {
-                self.prunes.insert(*dst, prunes_vec);
-            }
-        }
+        //     for (src, hops) in src_hops_map.iter() {
+        //         if min_hops.is_none() || *hops < *min_hops.unwrap() {
+        //             if let Some(old_mst_src) = self.mst.insert(*dst, (*src, *hops)) {
+        //                 prunes_vec.push(old_mst_src);
+        //             }
+        //             min_hops = Some(hops);
+        //             mst_src = Some(src);
+        //         } else {
+        //             prunes_vec.push((*src, *hops));
+        //         }
+        //     }
+        //     if let Some(mst_src) = mst_src {
+        //         self.mst.insert(*dst, (*mst_src, *min_hops.unwrap()));
+        //     }
+        //     if !prunes_vec.is_empty() {
+        //         self.prunes.insert(*dst, prunes_vec);
+        //     }
+        // }
 
-        info!("MST: ");
-        for (dst, (src, hops)) in &self.mst {
-            info!("dst, src, hops: {:?}, {:?}, {}", dst, src, hops);
-        }
+        // info!("MST: ");
+        // for (dst, (src, hops)) in &self.mst {
+        //     info!("dst, src, hops: {:?}, {:?}, {}", dst, src, hops);
+        // }
 
-        for (dst, pruned) in &self.prunes {
-            info!("---------- Pruner: {:?} ----------", dst);
-            for (prune, hops) in pruned {
-                info!("Prunee src, hops: {:?}, {}", prune, hops);
-            }
-        }
+        // for (dst, pruned) in &self.prunes {
+        //     info!("---------- Pruner: {:?} ----------", dst);
+        //     for (prune, hops) in pruned {
+        //         info!("Prunee src, hops: {:?}, {}", prune, hops);
+        //     }
+        // }
 
-        for (dst, src_hops) in &self.orders {
-            let len_prunes = self.prunes.get(dst).unwrap().len();
-            assert_eq!(src_hops.len() - 1, len_prunes);
-        }
+        // for (dst, src_hops) in &self.orders {
+        //     let len_prunes = self.prunes.get(dst).unwrap().len();
+        //     assert_eq!(src_hops.len() - 1, len_prunes);
+        // }
 
 
-    }
+    // }
 }
 
 
@@ -557,12 +627,12 @@ mod tests {
         assert_eq!(cluster.get_visited_len(), 6);
 
         // check minimum distances
-        assert_eq!(cluster.get_distance(&nodes[0].pubkey()).unwrap(), &2u64); // M, 2 hops from 5 -> M
-        assert_eq!(cluster.get_distance(&nodes[1].pubkey()).unwrap(), &3u64); // h, 3 hops from 5 -> h
-        assert_eq!(cluster.get_distance(&nodes[2].pubkey()).unwrap(), &1u64); // 3, 1 hop
-        assert_eq!(cluster.get_distance(&nodes[3].pubkey()).unwrap(), &2u64); // P, 2 hops
-        assert_eq!(cluster.get_distance(&nodes[4].pubkey()).unwrap(), &1u64); // j, 1 hop
-        assert_eq!(cluster.get_distance(&nodes[5].pubkey()).unwrap(), &0u64); // 5, 0 hops
+        assert_eq!(cluster.get_distance(&nodes[0].pubkey()), 2u64); // M, 2 hops from 5 -> M
+        assert_eq!(cluster.get_distance(&nodes[1].pubkey()), 3u64); // h, 3 hops from 5 -> h
+        assert_eq!(cluster.get_distance(&nodes[2].pubkey()), 1u64); // 3, 1 hop
+        assert_eq!(cluster.get_distance(&nodes[3].pubkey()), 2u64); // P, 2 hops
+        assert_eq!(cluster.get_distance(&nodes[4].pubkey()), 1u64); // j, 1 hop
+        assert_eq!(cluster.get_distance(&nodes[5].pubkey()), 0u64); // 5, 0 hops
 
         // check number of inbound connections
         assert_eq!(cluster.get_num_inbound(&nodes[0].pubkey()), 3);
