@@ -1,7 +1,3 @@
-use std::path::Iter;
-
-use solana_sdk::blake3::Hash;
-
 use {
     crate::{push_active_set::PushActiveSet, received_cache::ReceivedCache, Error},
     crossbeam_channel::{Receiver, Sender},
@@ -21,11 +17,11 @@ use {
     },
 };
 
+#[cfg_attr(test, cfg(test))]
 pub(crate) const CRDS_UNIQUE_PUBKEY_CAPACITY: usize = 8192;
-const GOSSIP_PUSH_FANOUT: usize = 6;
 
 pub struct Cluster {
-    // count: u64,
+    gossip_push_fanout: usize,
 
     // set of nodes that have allready been visited!
     visited: HashSet<Pubkey>,
@@ -51,14 +47,57 @@ pub struct Cluster {
 
 impl Cluster {
 
-    pub fn new() -> Self {
+    pub fn new(
+        push_fanout: usize
+    ) -> Self {
         Cluster { 
-            // count: 0,
+            gossip_push_fanout: push_fanout,
             visited: HashSet::new(),
             queue: VecDeque::new(),
             distances: HashMap::new(),
             orders: HashMap::new(),
         }
+    }
+
+    pub fn get_order_key(
+        &self,
+        dest_node: &Pubkey,
+    ) -> bool {
+        self.orders.contains_key(dest_node)
+    }
+
+    pub fn get_num_inbound(
+        &self,
+        dest_node: &Pubkey,
+    ) -> usize {
+        self.orders
+            .get(dest_node)
+            .unwrap()
+            .len()
+    }
+
+    pub fn get_orders(
+        &self,
+        dest_node: &Pubkey,
+        src_node: &Pubkey,
+    ) -> Option<&u64> {
+        self.orders
+            .get(dest_node)
+            .unwrap()
+            .get(src_node)
+    }
+
+    pub fn get_visited_len(
+        &self,
+    ) -> usize {
+        self.visited.len()
+    }
+
+    pub fn get_distance(
+        &self,
+        pubkey: &Pubkey,
+    ) -> Option<&u64> {
+        self.distances.get(pubkey)
     }
 
     pub fn coverage(
@@ -95,7 +134,7 @@ impl Cluster {
         }
     }
 
-    fn initize(
+    fn initialize(
         &mut self,
         stakes: &HashMap<Pubkey, u64>,
     ) {
@@ -112,7 +151,7 @@ impl Cluster {
         node_map: &HashMap<Pubkey, &Node>,
     ) {
         //initialize BFS setup
-        self.initize(stakes);
+        self.initialize(stakes);
 
         // initialize for origin node
         self.distances.insert(*origin_pubkey, 0); //initialize beginning node
@@ -138,7 +177,8 @@ impl Cluster {
                     |_| false, 
                     stakes
                 )
-                .take(GOSSIP_PUSH_FANOUT) {
+                .take(self.gossip_push_fanout) {
+                    debug!("curr node, neighbor: {:?}, {:?}", current_node.pubkey(), neighbor);
                     //check if we have visited this node before.
                     if !self.visited.contains(neighbor) {
                         // if not, we insert it
@@ -215,7 +255,7 @@ impl Node {
     ) {
         // Gossip nodes to be sampled for each push active set.
         // TODO: this should only be a set of entrypoints not all staked nodes.
-        let nodes: Vec<_> = stakes
+        let mut nodes: Vec<_> = stakes
             .keys()
             .copied()
             .chain(self.table.keys().map(|key| key.origin))
@@ -223,47 +263,17 @@ impl Node {
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
+
+        if cfg!(test) {
+            nodes.sort();
+        }
+
         let cluster_size = nodes.len();
         // note the gossip_push_fanout * 3 is equivalent to CRDS_GOSSIP_PUSH_ACTIVE_SET_SIZE in solana
         // note, here the default is 6*3=18. but in solana it is 6*2=12
         self.active_set
             .rotate(rng, gossip_push_fanout * 2, cluster_size, &nodes, stakes, self.pubkey());
     }
-
-    pub fn hey (
-        &self,
-        stakes: &HashMap<Pubkey, u64>,
-    ) {
-        let k = self.start_run_mst(stakes);
-
-    }
-
-    pub fn start_run_mst(
-        &self, 
-        stakes: &HashMap<Pubkey, u64>,
-    ) -> Vec<Pubkey> { 
-        // let origin = &self.pubkey();
-        // TODO: not efficient. just a fix for now. copies every pubkey in the PASE and returns it in a vector
-        // it is only GOSSIP_PUSH_FANOUT to copy but still
-        return self
-            .active_set
-            .get_nodes(&self.pubkey(), &&self.pubkey(), |_| false, stakes)
-            .take(GOSSIP_PUSH_FANOUT)
-            .cloned()
-            .collect::<Vec<_>>();
-
-    }
-
-    pub fn run_mst(
-        &mut self, 
-        stakes: &HashMap<Pubkey, u64>,
-        nodes: &Vec<Pubkey>,
-        origin: &Pubkey,
-    ) {
-        info!("hey from node: {:?}", self.pubkey);
-
-    }
-
 
 }
 
@@ -317,9 +327,9 @@ fn make_gossip_cluster(
         .collect::<Result<_, Error>>()?;
 
     let num_nodes_staked = nodes
-    .iter()
-    .filter(|(node, _sender)| node.stake != 0)
-    .count();
+        .iter()
+        .filter(|(node, _sender)| node.stake != 0)
+        .count();
     info!("num of staked nodes in cluster: {}", num_nodes_staked);
     info!("num of cluster nodes: {}", nodes.len());
     let active_stake: u64 = accounts.values().sum();
@@ -363,4 +373,173 @@ pub fn make_gossip_cluster_from_rpc(
         });
     
     make_gossip_cluster(&stakes)
+}
+
+pub fn make_gossip_cluster_for_tests(
+    accounts: &HashMap<Pubkey, u64>
+) -> Result<Vec<(Node, Sender<Arc<Packet>>)>, Error> {
+    info!("num of node pubkeys in vote accounts: {}", accounts.len());
+    let now = Instant::now();
+
+    let nodes: Vec<_> = accounts.into_iter().map(|node| {
+        let stake = accounts.get(node.0).copied().unwrap_or_default(); //get stake from 
+            let pubkey = node.0;
+            let (sender, receiver) = crossbeam_channel::unbounded();
+            let node = Node {
+                clock: now,
+                num_gossip_rounds: 0,
+                stake,
+                pubkey: *pubkey,
+                table: HashMap::default(),
+                active_set: PushActiveSet::default(),
+                received_cache: ReceivedCache::new(2 * CRDS_UNIQUE_PUBKEY_CAPACITY),
+                receiver,
+            };
+            Ok((node, sender))
+        })
+        .collect::<Result<_, Error>>()?;
+
+    let num_nodes_staked = nodes
+        .iter()
+        .filter(|(node, _sender)| node.stake != 0)
+        .count();
+    info!("num of staked nodes in cluster: {}", num_nodes_staked);
+    info!("num of cluster nodes: {}", nodes.len());
+    let active_stake: u64 = accounts.values().sum();
+    let cluster_stake: u64 = nodes.iter().map(|(node, _sender)| node.stake).sum();
+    info!("active stake:  {}", active_stake);
+    info!("cluster stake: {}", cluster_stake);
+    Ok(nodes)
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        rand::SeedableRng, rand_chacha::ChaChaRng, std::iter::repeat_with,
+        rand::Rng,
+        solana_sdk::{pubkey::Pubkey},
+        std::{
+            collections::{HashMap},
+        },
+        solana_sdk::native_token::LAMPORTS_PER_SOL,
+    };
+
+    pub fn get_bucket(stake: &u64) -> u64 {
+        let stake = stake / LAMPORTS_PER_SOL;
+        // say stake is high. few leading zeros. so bucket is high.
+        let bucket = u64::BITS - stake.leading_zeros();
+        // get min of 24 and bucket. higher numbered buckets are higher stake. low buckets low stake
+        let bucket = (bucket as usize).min(25 - 1);
+        bucket as u64
+    }
+
+    pub fn run_gossip(
+        rng: &mut ChaChaRng,
+        nodes: &mut Vec<Node>,
+        stakes: &HashMap<Pubkey, /*stake:*/ u64>,
+    ) {
+        // let mut rng = rand::thread_rng();
+        for node in nodes {
+            node.run_gossip(rng, stakes);
+        }
+    }
+
+    #[test]
+    fn test_mst() {
+        const PUSH_FANOUT: usize = 2;
+        let nodes: Vec<_> = repeat_with(Pubkey::new_unique).take(5).collect();
+        const MAX_STAKE: u64 = (1 << 20) * LAMPORTS_PER_SOL;
+        let mut rng = ChaChaRng::from_seed([189u8; 32]);
+        let pubkey = Pubkey::new_unique();
+        let stakes = repeat_with(|| rng.gen_range(1, MAX_STAKE));
+        let mut stakes: HashMap<_, _> = nodes.iter().copied().zip(stakes).collect();
+        stakes.insert(pubkey, rng.gen_range(1, MAX_STAKE));
+
+        let res = make_gossip_cluster_for_tests(&stakes)
+            .unwrap();
+
+        let (mut nodes, _): (Vec<_>, Vec<_>) = res
+            .into_iter()
+            .map(|(node, sender)| {
+                let pubkey = node.pubkey();
+                (node, (pubkey, sender))
+            })
+            .unzip();
+
+        // sort to maintain order across tests
+        nodes.sort_by_key(|node| node.pubkey() );
+
+        // setup gossip
+        run_gossip(&mut rng, &mut nodes, &stakes);
+    
+        let node_map: HashMap<Pubkey, &Node> = nodes
+            .iter()
+            .map(|node| (node.pubkey(), node))
+            .collect();
+
+        let mut cluster: Cluster = Cluster::new(PUSH_FANOUT);
+        let origin_pubkey = &pubkey; //just a temp origin selection
+        cluster.new_mst(origin_pubkey, &stakes, &node_map);
+
+        // verify buckets
+        let mut keys = stakes.keys().cloned().collect::<Vec<_>>();
+        keys.sort_by_key(|&k| stakes.get(&k));
+
+        let buckets: Vec<u64> = vec![15, 16, 19, 19, 20, 20];
+        for (key, &bucket) in keys.iter().zip(buckets.iter()) {
+            let current_stake = stakes.get(&key).unwrap();
+            let bucket_from_stake = get_bucket(current_stake);
+            assert_eq!(bucket, bucket_from_stake);
+        }
+
+        // in this test all nodes should be visited
+        assert_eq!(cluster.get_visited_len(), 6);
+
+        // check minimum distances
+        assert_eq!(cluster.get_distance(&nodes[0].pubkey()).unwrap(), &2u64); // M, 2 hops from 5 -> M
+        assert_eq!(cluster.get_distance(&nodes[1].pubkey()).unwrap(), &3u64); // h, 3 hops from 5 -> h
+        assert_eq!(cluster.get_distance(&nodes[2].pubkey()).unwrap(), &1u64); // 3, 1 hop
+        assert_eq!(cluster.get_distance(&nodes[3].pubkey()).unwrap(), &2u64); // P, 2 hops
+        assert_eq!(cluster.get_distance(&nodes[4].pubkey()).unwrap(), &1u64); // j, 1 hop
+        assert_eq!(cluster.get_distance(&nodes[5].pubkey()).unwrap(), &0u64); // 5, 0 hops
+
+        // check number of inbound connections
+        assert_eq!(cluster.get_num_inbound(&nodes[0].pubkey()), 3);
+        assert_eq!(cluster.get_num_inbound(&nodes[1].pubkey()), 1);
+        assert_eq!(cluster.get_num_inbound(&nodes[2].pubkey()), 3);
+        assert_eq!(cluster.get_num_inbound(&nodes[3].pubkey()), 2);
+        assert_eq!(cluster.get_num_inbound(&nodes[4].pubkey()), 3);
+        
+        // check num of hops per inbound connection
+        // M
+        assert_eq!(cluster.get_orders(&nodes[0].pubkey(), &nodes[1].pubkey()).unwrap(), &4u64); // M <- h, 4 hops
+        assert_eq!(cluster.get_orders(&nodes[0].pubkey(), &nodes[4].pubkey()).unwrap(), &2u64); // M <- j, 2 hops
+
+        // h
+        assert_eq!(cluster.get_orders(&nodes[1].pubkey(), &nodes[0].pubkey()).unwrap(), &3u64); // h <- M, 3 hops
+
+        // 3 
+        assert_eq!(cluster.get_orders(&nodes[2].pubkey(), &nodes[0].pubkey()).unwrap(), &3u64); // 3 <- M, 3 hops
+        assert_eq!(cluster.get_orders(&nodes[2].pubkey(), &nodes[3].pubkey()).unwrap(), &3u64); // 3 <- P, 3 hops
+        assert_eq!(cluster.get_orders(&nodes[2].pubkey(), &nodes[5].pubkey()).unwrap(), &1u64); // 3 <- 5, 1 hop
+
+        // P
+        assert_eq!(cluster.get_orders(&nodes[0].pubkey(), &nodes[1].pubkey()).unwrap(), &4u64); // M <- h, 4 hops
+        assert_eq!(cluster.get_orders(&nodes[0].pubkey(), &nodes[4].pubkey()).unwrap(), &2u64); // M <- j, 2 hops
+
+        // j
+        assert_eq!(cluster.get_orders(&nodes[4].pubkey(), &nodes[2].pubkey()).unwrap(), &2u64); // j <- 3, 2 hops
+        assert_eq!(cluster.get_orders(&nodes[4].pubkey(), &nodes[3].pubkey()).unwrap(), &3u64); // j <- P, 3 hops
+        assert_eq!(cluster.get_orders(&nodes[4].pubkey(), &nodes[5].pubkey()).unwrap(), &1u64); // j <- 5, 1 hop
+
+        // 5 - None
+        // ensure origin is NOT in the orders map
+        assert!(!cluster.get_order_key(&nodes[5].pubkey()));
+
+        // test coverage. should be full coverage with 0 left out nodes
+        assert_eq!(cluster.coverage(&stakes), (1f64, 0usize));
+
+    }
+
 }
