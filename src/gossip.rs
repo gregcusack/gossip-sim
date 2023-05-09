@@ -224,6 +224,8 @@ impl Cluster {
                         //update the distance. saying the neighbor node we are looking at is
                         // an additional hop from the current node. so it is going to be 
                         // an additional hop
+                        // NOTE: with BFS, there is no chance we will find a shorter path than the path we find here
+                        // BFS searches at ever increasing distances from an origin node.
                         self.distances.insert(*neighbor, (current_distance + 1, current_node_pubkey));
                         
                         self.queue.push_back(*neighbor);
@@ -234,46 +236,15 @@ impl Cluster {
                                 .entry(current_node_pubkey)
                                 .or_insert_with(|| HashSet::<Pubkey>::new())
                                 .insert(*neighbor);
-                    } else { //  have seen neighbor, so compare hops to get to neighbor from what 
-                             //  we've previously seen
-                        // get min number of hops to neighbor that we know of
-                        let (minimum_known_dist, from) = self.distances
-                            .get(neighbor)
-                            .unwrap()
-                            .clone(); 
-
-                        if current_distance + 1 < minimum_known_dist {
-                            // we have found a faster way (fewer hops) to get to the neighbor node
-                            // update distances to have shorter distance to neighbor 
-                            self.distances
-                                .insert(*neighbor, (current_distance + 1, current_node_pubkey));
-
-                            // remove the old from mst.
-                            // fewest hops used to be from "from" => neighbor.
-                            // now it is "current_node" => "neighbor"
-                            self.mst
-                                .get_mut(&from)
-                                .unwrap()
-                                .remove(neighbor);
-
-                            self.mst
-                                .entry(current_node_pubkey)
-                                .or_insert_with(|| HashSet::<Pubkey>::new())
-                                .insert(*neighbor);
-
-
-                        } else {
-                            // since we already know of a quicker way to get to this neighbor
-                            // add the current node to the neighbor's prune list.
-                            // neighbor pruning current node
-                            self.prunes
+                    } else {
+                        // we have seen this neighbor before. let's prune the current node from the 
+                        // neighbor node's active set.
+                        // neighbor sends "prune" to current_node
+                        self.prunes
                                 .entry(*neighbor)
                                 .or_insert_with(|| HashSet::<Pubkey>::new())
                                 .insert(current_node_pubkey);
-                        }
-
                     }
-
                     // Here we track, for specific neighbor, we know that the current node
                     // has sent a message to the neighbor. So we must note that
                     // our neighbor has received a message from the current node
@@ -669,6 +640,8 @@ mod tests {
 
         // test coverage. should be full coverage with 0 left out nodes
         assert_eq!(cluster.coverage(&stakes), (1f64, 0usize));
+
+        
 
     }
 
