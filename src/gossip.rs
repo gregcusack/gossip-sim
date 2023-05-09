@@ -1,3 +1,5 @@
+use solana_sdk::blake3::Hash;
+
 use {
     crate::{push_active_set::PushActiveSet, received_cache::ReceivedCache, Error},
     crossbeam_channel::{Receiver, Sender},
@@ -43,6 +45,15 @@ pub struct Cluster {
     // It took 3 hops to reach A through C.
     // For our next step we would need to PRUNE B.
     orders: HashMap<Pubkey, HashMap<Pubkey, u64>>,
+
+    // store the adjacency list the MST. src_pubkey => HashSet<dst_pubkey>
+    mst: HashMap<Pubkey, HashSet<Pubkey>>, 
+
+    // stores all of the src nodes for a given dst node that is pruned
+    // dst_pubkey => {src_pubkey, hops}
+    prunes: HashMap<Pubkey, HashSet<Pubkey>>,
+
+
 }
 
 impl Cluster {
@@ -56,6 +67,8 @@ impl Cluster {
             queue: VecDeque::new(),
             distances: HashMap::new(),
             orders: HashMap::new(),
+            mst: HashMap::new(),
+            prunes: HashMap::new(),
         }
     }
 
@@ -96,8 +109,8 @@ impl Cluster {
     pub fn get_distance(
         &self,
         pubkey: &Pubkey,
-    ) -> Option<&u64> {
-        self.distances.get(pubkey)
+    ) -> u64 {
+        *self.distances.get(pubkey).unwrap()
     }
 
     pub fn coverage(
@@ -130,6 +143,30 @@ impl Cluster {
             info!("----- dest node, num_inbound: {:?}, {} -----", recv_pubkey, neighbors.len());
             for (peer, order) in neighbors {
                 info!("neighbor pubkey, order: {:?}, {}", peer, order);
+            }
+        }
+    }
+
+    pub fn print_mst(
+        &self,
+    ) {
+        info!("MST: ");
+        for (src, dests) in &self.mst {
+            info!("##### src: {:?} #####", src);
+            for dest in dests {
+                info!("dest: {:?}", dest);
+            }
+        }
+    }
+
+    pub fn print_prunes(
+        &self,
+    ) {
+        info!("PRUNES: ");
+        for (dest, prunes) in &self.prunes {
+            info!("--------- Pruner: {:?} ---------", dest);
+            for prune in prunes {
+                info!("Prunee: {:?}", prune);
             }
         }
     }
@@ -186,11 +223,27 @@ impl Cluster {
                         //update the distance. saying the neighbor node we are looking at is
                         // an additional hop from the current node. so it is going to be 
                         // an additional hop
+                        // NOTE: with BFS, there is no chance we will find a shorter path than the path we find here
+                        // BFS searches at ever increasing distances from an origin node.
                         self.distances.insert(*neighbor, current_distance + 1);
                         
                         self.queue.push_back(*neighbor);
-                    }
 
+                        // found a new neighbor for our current node
+                        // add the new neighbor to the current node's adjacency hashset
+                        self.mst
+                                .entry(current_node_pubkey)
+                                .or_insert_with(|| HashSet::<Pubkey>::new())
+                                .insert(*neighbor);
+                    } else {
+                        // we have seen this neighbor before. let's prune the current node from the 
+                        // neighbor node's active set.
+                        // neighbor sends "prune" to current_node
+                        self.prunes
+                                .entry(*neighbor)
+                                .or_insert_with(|| HashSet::<Pubkey>::new())
+                                .insert(current_node_pubkey);
+                    }
                     // Here we track, for specific neighbor, we know that the current node
                     // has sent a message to the neighbor. So we must note that
                     // our neighbor has received a message from the current node
@@ -204,7 +257,6 @@ impl Cluster {
                         .insert(current_node_pubkey, current_distance + 1);
             }
         }
-    
     }
 }
 
@@ -439,7 +491,6 @@ mod tests {
         nodes: &mut Vec<Node>,
         stakes: &HashMap<Pubkey, /*stake:*/ u64>,
     ) {
-        // let mut rng = rand::thread_rng();
         for node in nodes {
             node.run_gossip(rng, stakes);
         }
@@ -497,12 +548,12 @@ mod tests {
         assert_eq!(cluster.get_visited_len(), 6);
 
         // check minimum distances
-        assert_eq!(cluster.get_distance(&nodes[0].pubkey()).unwrap(), &2u64); // M, 2 hops from 5 -> M
-        assert_eq!(cluster.get_distance(&nodes[1].pubkey()).unwrap(), &3u64); // h, 3 hops from 5 -> h
-        assert_eq!(cluster.get_distance(&nodes[2].pubkey()).unwrap(), &1u64); // 3, 1 hop
-        assert_eq!(cluster.get_distance(&nodes[3].pubkey()).unwrap(), &2u64); // P, 2 hops
-        assert_eq!(cluster.get_distance(&nodes[4].pubkey()).unwrap(), &1u64); // j, 1 hop
-        assert_eq!(cluster.get_distance(&nodes[5].pubkey()).unwrap(), &0u64); // 5, 0 hops
+        assert_eq!(cluster.get_distance(&nodes[0].pubkey()), 2u64); // M, 2 hops from 5 -> M
+        assert_eq!(cluster.get_distance(&nodes[1].pubkey()), 3u64); // h, 3 hops from 5 -> h
+        assert_eq!(cluster.get_distance(&nodes[2].pubkey()), 1u64); // 3, 1 hop
+        assert_eq!(cluster.get_distance(&nodes[3].pubkey()), 2u64); // P, 2 hops
+        assert_eq!(cluster.get_distance(&nodes[4].pubkey()), 1u64); // j, 1 hop
+        assert_eq!(cluster.get_distance(&nodes[5].pubkey()), 0u64); // 5, 0 hops
 
         // check number of inbound connections
         assert_eq!(cluster.get_num_inbound(&nodes[0].pubkey()), 3);
@@ -539,6 +590,8 @@ mod tests {
 
         // test coverage. should be full coverage with 0 left out nodes
         assert_eq!(cluster.coverage(&stakes), (1f64, 0usize));
+
+        
 
     }
 

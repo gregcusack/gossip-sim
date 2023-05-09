@@ -7,6 +7,7 @@ A Simulation Framework for Solana's Gossip Protocol
     - At time `t` what does the spanning tree for messages originating from `Node A` look like?
     - What percentage of nodes in the network will receive this message with push messages?
 - Test pruning logic
+    - based on 
 - Test scoring logic
 - Test shuffle logic
 
