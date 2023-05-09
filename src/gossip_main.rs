@@ -142,6 +142,9 @@ fn main() {
     info!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
     info!("{} nodes are stranded", stranded_nodes);
 
+    cluster.generate_prunes();
+    
+
 
 
 

@@ -1,3 +1,5 @@
+use solana_sdk::blake3::Hash;
+
 use {
     crate::{push_active_set::PushActiveSet, received_cache::ReceivedCache, Error},
     crossbeam_channel::{Receiver, Sender},
@@ -43,6 +45,15 @@ pub struct Cluster {
     // It took 3 hops to reach A through C.
     // For our next step we would need to PRUNE B.
     orders: HashMap<Pubkey, HashMap<Pubkey, u64>>,
+
+    // store the connections from dst_pubkey => (src_pubkey, hops)
+    mst: HashMap<Pubkey, (Pubkey, u64)>,
+
+    // stores all of the src nodes for a given dst node that is pruned
+    // dst_pubkey => {src_pubkey, hops}
+    prunes: HashMap<Pubkey, Vec<(Pubkey, u64)>>,
+
+
 }
 
 impl Cluster {
@@ -56,6 +67,8 @@ impl Cluster {
             queue: VecDeque::new(),
             distances: HashMap::new(),
             orders: HashMap::new(),
+            mst: HashMap::new(),
+            prunes: HashMap::new(),
         }
     }
 
@@ -205,6 +218,53 @@ impl Cluster {
             }
         }
     
+    }
+
+    pub fn generate_prunes(
+        &mut self,
+    ) {
+        for (dst, src_hops_map) in self.orders.iter() {
+            let mut prunes_vec: Vec<(Pubkey, u64)> = Vec::new();
+            let mut mst_src: Option<&Pubkey> = None;
+            let mut min_hops: Option<&u64> = None;
+        
+            for (src, hops) in src_hops_map.iter() {
+                if min_hops.is_none() || *hops < *min_hops.unwrap() {
+                    if let Some(old_mst_src) = self.mst.insert(*dst, (*src, *hops)) {
+                        prunes_vec.push(old_mst_src);
+                    }
+                    min_hops = Some(hops);
+                    mst_src = Some(src);
+                } else {
+                    prunes_vec.push((*src, *hops));
+                }
+            }
+            if let Some(mst_src) = mst_src {
+                self.mst.insert(*dst, (*mst_src, *min_hops.unwrap()));
+            }
+            if !prunes_vec.is_empty() {
+                self.prunes.insert(*dst, prunes_vec);
+            }
+        }
+
+        info!("MST: ");
+        for (dst, (src, hops)) in &self.mst {
+            info!("dst, src, hops: {:?}, {:?}, {}", dst, src, hops);
+        }
+
+        for (dst, pruned) in &self.prunes {
+            info!("---------- Pruner: {:?} ----------", dst);
+            for (prune, hops) in pruned {
+                info!("Prunee src, hops: {:?}, {}", prune, hops);
+            }
+        }
+
+        for (dst, src_hops) in &self.orders {
+            let len_prunes = self.prunes.get(dst).unwrap().len();
+            assert_eq!(src_hops.len() - 1, len_prunes);
+        }
+
+
     }
 }
 
