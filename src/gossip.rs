@@ -32,8 +32,7 @@ pub struct Cluster {
     queue: VecDeque<Pubkey>,
 
     // keep track of the shortest distance from the starting node to each node in the graph
-    // dst_node: (hops, rx from)
-    distances: HashMap<Pubkey, (u64, Pubkey)>,
+    distances: HashMap<Pubkey, u64>,
 
     // keep track of the order in which each recipient node is reach by its neighbors
     // key is the recipient node
@@ -111,7 +110,7 @@ impl Cluster {
         &self,
         pubkey: &Pubkey,
     ) -> u64 {
-        self.distances.get(pubkey).unwrap().0
+        *self.distances.get(pubkey).unwrap()
     }
 
     pub fn coverage(
@@ -126,7 +125,7 @@ impl Cluster {
         &self,
     ) {
         info!("DISTANCES FROM ORIGIN");
-        for (pubkey, (hops, _)) in &self.distances {
+        for (pubkey, hops) in &self.distances {
             info!("dest node, hops: ({:?}, {})", pubkey, hops);
         }
     }
@@ -178,7 +177,7 @@ impl Cluster {
     ) {
         for (pubkey, _) in stakes {
             // Initialize the `distances` hashmap with a distance of infinity for each node in the graph
-            self.distances.insert(*pubkey, (u64::MAX, Pubkey::default()));
+            self.distances.insert(*pubkey, u64::MAX);
         }
     }
 
@@ -192,7 +191,7 @@ impl Cluster {
         self.initialize(stakes);
 
         // initialize for origin node
-        self.distances.insert(*origin_pubkey, (0, Pubkey::default())); //initialize beginning node
+        self.distances.insert(*origin_pubkey, 0); //initialize beginning node
         self.queue.push_back(*origin_pubkey);
         self.visited.insert(*origin_pubkey);
 
@@ -200,7 +199,7 @@ impl Cluster {
         while !self.queue.is_empty() {
             // Dequeue the next node from the queue and get its current distance
             let current_node_pubkey = self.queue.pop_front().unwrap();
-            let (current_distance, _) = self.distances[&current_node_pubkey];
+            let current_distance = self.distances[&current_node_pubkey];
 
             // need to get the actual node itself so we can get it's active_set and PASE
             let current_node = node_map.get(&current_node_pubkey).unwrap();
@@ -226,7 +225,7 @@ impl Cluster {
                         // an additional hop
                         // NOTE: with BFS, there is no chance we will find a shorter path than the path we find here
                         // BFS searches at ever increasing distances from an origin node.
-                        self.distances.insert(*neighbor, (current_distance + 1, current_node_pubkey));
+                        self.distances.insert(*neighbor, current_distance + 1);
                         
                         self.queue.push_back(*neighbor);
 
@@ -258,55 +257,7 @@ impl Cluster {
                         .insert(current_node_pubkey, current_distance + 1);
             }
         }
-    
     }
-
-    // pub fn generate_prunes(
-    //     &mut self,
-    // ) {
-        // for (dst, src_hops_map) in self.orders.iter() {
-        //     let mut prunes_vec: Vec<(Pubkey, u64)> = Vec::new();
-        //     let mut mst_src: Option<&Pubkey> = None;
-        //     let mut min_hops: Option<&u64> = None;
-        
-        //     for (src, hops) in src_hops_map.iter() {
-        //         if min_hops.is_none() || *hops < *min_hops.unwrap() {
-        //             if let Some(old_mst_src) = self.mst.insert(*dst, (*src, *hops)) {
-        //                 prunes_vec.push(old_mst_src);
-        //             }
-        //             min_hops = Some(hops);
-        //             mst_src = Some(src);
-        //         } else {
-        //             prunes_vec.push((*src, *hops));
-        //         }
-        //     }
-        //     if let Some(mst_src) = mst_src {
-        //         self.mst.insert(*dst, (*mst_src, *min_hops.unwrap()));
-        //     }
-        //     if !prunes_vec.is_empty() {
-        //         self.prunes.insert(*dst, prunes_vec);
-        //     }
-        // }
-
-        // info!("MST: ");
-        // for (dst, (src, hops)) in &self.mst {
-        //     info!("dst, src, hops: {:?}, {:?}, {}", dst, src, hops);
-        // }
-
-        // for (dst, pruned) in &self.prunes {
-        //     info!("---------- Pruner: {:?} ----------", dst);
-        //     for (prune, hops) in pruned {
-        //         info!("Prunee src, hops: {:?}, {}", prune, hops);
-        //     }
-        // }
-
-        // for (dst, src_hops) in &self.orders {
-        //     let len_prunes = self.prunes.get(dst).unwrap().len();
-        //     assert_eq!(src_hops.len() - 1, len_prunes);
-        // }
-
-
-    // }
 }
 
 
@@ -540,7 +491,6 @@ mod tests {
         nodes: &mut Vec<Node>,
         stakes: &HashMap<Pubkey, /*stake:*/ u64>,
     ) {
-        // let mut rng = rand::thread_rng();
         for node in nodes {
             node.run_gossip(rng, stakes);
         }
