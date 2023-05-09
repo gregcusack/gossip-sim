@@ -7,7 +7,6 @@ A Simulation Framework for Solana's Gossip Protocol
     - At time `t` what does the spanning tree for messages originating from `Node A` look like?
     - What percentage of nodes in the network will receive this message with push messages?
 - Test pruning logic
-    - based on 
 - Test scoring logic
 - Test shuffle logic
 
@@ -110,6 +109,58 @@ neighbor pubkey, order: AXrSStSdmJuEubQx5bYx7aEDZ1zmt4CjrHvEmTNNenkV, 4
 ```
 - Outputs the cluster coverage. aka the percentage of nodes receiving messages for this origin and current set of active sets
 - Outputs the number of standed nodes
+
+#### MST Adjacency List
+```
+MST:
+\##### src: CsQpiAH9i1uJwAPaQRZJXzYmDJPar4gJsi9Xwr7JLk9L #####
+dest: 5uAJn8Wfie7k7kd6RzCutG8JSAxxHS6b7iRriaEBp3Cc
+\##### src: 4ZToBgveZ5m8NySrDyPA2fiGVRVBioaoMXD31KGidm65 #####
+dest: 8cuMnfEfiaJfWsLj7pPhtSvf9dxXs2eHG55CJmp1bzJP
+dest: J5wNgFnrLQiRLHEzySuYphYpz7cQsTmwkVWxEKPJcLWe
+\##### src: 7CjTgWwwvQ1VjSsNPWN6sKFpTrziD2yJpcr6KaN1jGFG #####
+dest: 8D5rQbJD9qLNJm9HyTjFWV93CBc29ozAdGUia4hyMhw
+dest: 9up7cNyP6c9Ay3bwNhLsdMUu44tNLosXHGhb1M6kjZ8D
+dest: 6Jqn61UPZmAskQSLBv3eDpa6cKkZKBkVtqDVGcaakwEa
+```
+- The outputs the adjacency list of the network's MST
+```
+CsQp -> 5uAJ
+4ZTo -> 8cuM, J5wN
+7CjT -> 8d5r, 9up7, 6Jqn
+```
+
+#### MST Prunes
+```
+--------- Pruner: FwdQr8NUppcFZFBNgV2V7fzANSuHnU3BebKYzh2U54G2 ---------
+Prunee: 6iVYxcvw9ctBwRb4xspzNXE4x5ykH6LPZJaGYTSPoZRa
+--------- Pruner: 6XjxbDk9epumcbnsq35NVGytzb5b9aHPodWpNnfUKaC5 ---------
+Prunee: DLiBQUytXnuXTuhhN8Mkom7rHbA9L49yiLchVBr2qDUp
+Prunee: FJfh3XUydWdBtrVTafcTyQfsgrpcggr1DJMGddKapTsL
+ --------- Pruner: D6uUDTEgXDf1yzLuQfFFCEKF9a2Ri5trFAWwaUpKB2ji ---------
+Prunee: 29rzUXiy2kYridD6zxc6nszsQpgVW8bknW9NMQEiQThi
+Prunee: 7TtboPzuUFJg5gCjnPVJKmBRZhfEmoAnNWXdsX81N28T
+Prunee: J4izU5SytdEsvEfotPJxvHMqz2CPkSBGMdQCGgT4XxYP
+```
+- Outputs the list of prunes by pruner => prunees
+```
+FwdQ --prunes--> 6iVY
+6Xjx --prunes--> DLiB, FJfh
+D6uU --prunes--> 29rz, 7Ttb, J4iz
+```
+- Note pruning is done on a second come, first prune basis. If you send a message to a node that has already received the message even if its the same number of hops, the received will prune you.
+- In example below, C will prune D.
+```
+A -> C
+B -> D -> C
+```
+- In example below, C will prune D. Had to make an assumption here on which message C would receive first with same number of hops. so for this simulation, we just take the first on the BFS alg.
+```
+A -> C
+D -> C
+```
+
+
 
 ## Caveat
 - Currently just takes the first node in the account list and uses it as the origin! Can't specify origin yet.
