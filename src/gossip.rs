@@ -22,6 +22,7 @@ use {
 #[cfg_attr(test, cfg(test))]
 pub(crate) const CRDS_UNIQUE_PUBKEY_CAPACITY: usize = 8192;
 
+
 pub struct Cluster {
     gossip_push_fanout: usize,
 
@@ -297,6 +298,28 @@ impl Cluster {
             }
         }
     }
+
+    pub fn prune_connections(
+        &mut self,
+        origin: &Pubkey,
+        node_map: &HashMap<Pubkey, &Node>,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        for (dest, prunes) in &self.prunes {
+            // prunes will be "this node"
+            // dest will peer (one sending message to us)
+            // origin is &node[0]. 
+            for self_pubkey in prunes.iter() {
+                let self_node = node_map
+                    .get(self_pubkey)
+                    .unwrap();
+
+                self_node.active_set.prune(self_pubkey, dest, &[*origin], stakes);
+            }
+        }
+    }
+
+    // pub fn 
 }
 
 

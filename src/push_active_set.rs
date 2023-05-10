@@ -261,17 +261,73 @@ mod tests {
                 assert!(filter.contains(node));
             }
         }
+        // for (index, pase) in active_set.0.iter().enumerate() {
+        //     println!("index: {}", index);
+        //     for (pubkey, bloom) in &pase.0 {
+        //         println!("node: {:?}", pubkey);
+        //     }
+
+        // }
         let other = &nodes[5];
         let origin = &nodes[17];
+
+        // all in 20th bucket
+        let other_buck = get_stake_bucket(stakes.get(other));
+        let origin_buck = get_stake_bucket(stakes.get(origin));
+        let self_buck = get_stake_bucket(stakes.get(&pubkey));
+
+        println!("other, origin, self stake buckets: {}, {}, {}", other_buck, origin_buck, self_buck);
+
+        for (index, node) in nodes.iter().enumerate() {
+            println!("node, index: {}, {}", node, index);
+        }
+
+        /*
+        active_set[20]:
+        index: 20
+        node: 11111117353mdUKehx9GW6JNHznGt5oSZs9fWkVkB // nodes[13]
+        node: 11111113pNDtm61yGF8j2ycAwLEPsuWQXobye5qDR // nodes[5]
+        node: 111111193m4hAxmCcGXMfnjVPfNhWSjb69sDgffKu // nodes[18]
+        node: 11111118F5rixNBnFLmioWZSYzjjFuAL5dyoDVzhD // nodes[16]
+        node: 1111111ogCyDbaRMvkdsHB3qfdyFYaG1WtRUAfdh  // nodes[0]
+        */
+
         assert!(active_set
             .get_nodes(&pubkey, origin, |_| false, &stakes)
             .eq([13, 5, 18, 16, 0].into_iter().map(|k| &nodes[k])));
+
+        for (index, pase) in active_set.0.iter().enumerate() {
+            if index == 20 {
+                for (pubkey, bloom) in &pase.0 {
+                    println!("node: {:?}", pubkey);
+                }
+            }
+        }
+        
+        // 5 not in here since other is nodes[5]. and get_nodes filters on what is in bloom filter which will be 5
         assert!(active_set
             .get_nodes(&pubkey, other, |_| false, &stakes)
             .eq([13, 18, 16, 0].into_iter().map(|k| &nodes[k])));
+        
         active_set.prune(&pubkey, &nodes[5], &[*origin], &stakes);
         active_set.prune(&pubkey, &nodes[3], &[*origin], &stakes);
         active_set.prune(&pubkey, &nodes[16], &[*origin], &stakes);
+
+        println!("post prune");
+        for pubkey in active_set.get_nodes(&pubkey, origin, |_| false, &stakes){
+            println!("node: {:?}", pubkey);
+        }
+
+        // So the active_set remains the same. but when we call "get_nodes", get_nodes() will not return 
+        // any nodes that have been pruned! 
+        // so we have to check the length of the output of get_nodes() (which is an iterator). so the 
+        // length of what the iterator is iterating over.
+
+        // next question is when we call "rotate()", is it possible we are rotating in pruned nodes?
+        // or is the set of nodes we pass in not including the pruned nodes (can't find a call to get_nodes())
+        // anywhere in the rotate logic or above.
+        // this may be a problem? active_set may be full, but full of pruned nodes.....boo
+
         assert!(active_set
             .get_nodes(&pubkey, origin, |_| false, &stakes)
             .eq([13, 18, 0].into_iter().map(|k| &nodes[k])));

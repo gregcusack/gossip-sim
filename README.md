@@ -174,6 +174,11 @@ D -> C
 - [x] Determine the minimum number of hops the message takes to reach all nodes in the network
 - [x] For a given destination node and its inbound neighbors, determine which neighbor was first, second, third, etc to deliver the message
 - [x] Determine coverage of network. # of nodes Rx message / # of nodes in network.
+- [x] Identify MST src->vec<dest>
+- [x] Identify dest->vec<src> prunes
+- [x] write tests for above
+- [ ] implement pruning logic.
+- [ ] measure coverage for different `CRDS_GOSSIP_PUSH_FANOUT` and `CRDS_GOSSIP_PUSH_ACTIVE_SET_SIZE`
 
 
 
