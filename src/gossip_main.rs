@@ -155,7 +155,9 @@ fn main() {
         let (coverage, stranded_nodes) = cluster.coverage(&stakes);
         info!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
         info!("{} nodes are stranded", stranded_nodes);
-        cluster.stranded_nodes(&stakes);
+        if stranded_nodes > 0 {
+            cluster.stranded_nodes(&stakes);
+        }
         if coverage < poor_coverage_threshold {
             warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
             number_of_poor_coverage_runs += 1;
