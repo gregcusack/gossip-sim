@@ -160,7 +160,7 @@ fn main() {
             warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
             number_of_poor_coverage_runs += 1;
         }
-
+      
         stats.insert_coverage(coverage);
         stats.insert_hops_stat(
             HopsStat::new(

@@ -55,8 +55,6 @@ pub enum CoverageStats {
     Min(f64),
 }
 
-
-
 impl std::fmt::Display for HopsStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

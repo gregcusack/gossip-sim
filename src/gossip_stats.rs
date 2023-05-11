@@ -194,8 +194,7 @@ impl CoverageStatsCollection {
         info!("{}", self.median);
         info!("{}", self.max);
         info!("{}", self.min);
-    }
-    
+    }    
 }
 
 pub struct GossipStats {
@@ -252,8 +251,6 @@ impl GossipStats {
     ) {
         self.coverage_stats.print_stats();
     }
-
-
 
 }
 
