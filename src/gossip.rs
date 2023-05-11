@@ -1,7 +1,7 @@
 use solana_sdk::blake3::Hash;
 
 use {
-    crate::{push_active_set::PushActiveSet, received_cache::ReceivedCache, Error},
+    crate::{push_active_set::PushActiveSet, received_cache::ReceivedCache, Error, gossip_stats},
     crossbeam_channel::{Receiver, Sender},
     itertools::Itertools,
     rand::Rng,
@@ -179,6 +179,27 @@ impl Cluster {
     ) -> (f64, usize) {
         debug!("visited len, stakes len: {}, {}", self.visited.len(), stakes.len());
         (self.visited.len() as f64 / stakes.len() as f64, stakes.len() - self.visited.len())
+    }
+
+    pub fn stranded_nodes(
+        &self,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        info!("Stranded Nodes, stakes: ");
+        for (pubkey, hops) in self.distances.iter() {
+            if hops == &u64::MAX {
+                let stake = stakes
+                                    .get(pubkey)
+                                    .unwrap();
+                info!("{:?}, {}", pubkey, stake);
+            }
+        }
+    }
+
+    pub fn get_distances(
+        &self,
+    ) -> &HashMap<Pubkey, u64> {
+        &self.distances
     }
 
     pub fn print_hops(
