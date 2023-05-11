@@ -6,7 +6,7 @@ use {
         API_MAINNET_BETA,
         Error,
         gossip_stats::GossipStats,
-        Stats,
+        gossip_stats::HopsStat,
     },
     solana_client::rpc_client::RpcClient,
     solana_sdk::pubkey::Pubkey,
@@ -139,7 +139,7 @@ fn main() {
     let mut number_of_poor_coverage_runs: u64 = 0;
     let poor_coverage_threshold: f64 = 0.95;
     let number_of_gossip_rounds = 1;
-    let mut stats = GossipStats::new();
+    let mut stats = GossipStats::default();
     for i in 0..number_of_gossip_rounds {
         info!("MST ITERATION: {}", i);
         info!("Calculating the MST for origin: {:?}", origin_pubkey);
@@ -155,11 +155,18 @@ fn main() {
         let (coverage, stranded_nodes) = cluster.coverage(&stakes);
         info!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
         info!("{} nodes are stranded", stranded_nodes);
+        cluster.stranded_nodes(&stakes);
         if coverage < poor_coverage_threshold {
             warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
             number_of_poor_coverage_runs += 1;
         }
-        stats.insert(coverage);
+
+        stats.insert_coverage(coverage);
+        stats.insert_hops_stat(
+            HopsStat::new(
+                cluster.get_distances()
+            )
+        );
 
         if log::log_enabled!(Level::Debug) {
             cluster.print_pushes();
@@ -170,8 +177,9 @@ fn main() {
         info!("################################################################");
     }
 
-    stats.calculate_stats();
-    stats.print_stats();
+    stats.calculate_coverage_stats();
+    stats.print_coverage_stats();
+    stats.print_hops_stats();
 
 
 }
