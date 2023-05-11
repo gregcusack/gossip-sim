@@ -5,7 +5,7 @@ use {
     crossbeam_channel::{Receiver, Sender},
     itertools::Itertools,
     rand::Rng,
-    log::{debug, info},
+    log::{debug, warn, info},
     solana_client::{
         rpc_client::RpcClient, rpc_config::RpcGetVoteAccountsConfig,
         rpc_response::RpcVoteAccountStatus,
@@ -16,11 +16,15 @@ use {
         sync::Arc,
         time::{Instant},
         str::FromStr,
+        fs::File,
+        io::{BufWriter, Write},
     },
+
 };
 
 #[cfg_attr(test, cfg(test))]
 pub(crate) const CRDS_UNIQUE_PUBKEY_CAPACITY: usize = 8192;
+
 
 pub struct Cluster {
     gossip_push_fanout: usize,
@@ -53,6 +57,10 @@ pub struct Cluster {
     // dst_pubkey => {src_pubkey, hops}
     prunes: HashMap<Pubkey, HashSet<Pubkey>>,
 
+    // get all nodes a src is pushing too
+    // src_node => dst_nodes {A, B, C, ..., N}
+    pushes: HashMap<Pubkey, HashSet<Pubkey>>,
+
 
 }
 
@@ -69,7 +77,20 @@ impl Cluster {
             orders: HashMap::new(),
             mst: HashMap::new(),
             prunes: HashMap::new(),
+            pushes: HashMap::new(),
         }
+    }
+
+    fn clear_maps(
+        &mut self,
+    ) {
+        self.visited.clear();
+        self.queue.clear();
+        self.distances.clear();
+        self.orders.clear();
+        self.mst.clear();
+        self.prunes.clear();
+        self.pushes.clear();
     }
 
     pub fn get_outbound_degree(
@@ -210,10 +231,46 @@ impl Cluster {
         }
     }
 
+    pub fn print_pushes(
+        &self,
+    ) {
+        info!("PUSHES: ");
+        for (src, dests) in &self.pushes {
+            info!("************* SRC: {:?}, # {} *************", src, dests.len());
+            for dst in dests {
+                info!("Dest: {:?}", dst);
+            }
+        }
+    }
+
+    pub fn write_adjacency_list_to_file(
+        &self,
+        filename: &str,
+    ) -> std::io::Result<()> {
+        let file = File::create(filename)?;
+        let mut writer = BufWriter::new(file);
+
+        for (src_node, dst_nodes) in self.mst.iter() {
+            // Write the source node
+            write!(writer, "{:-4}:", src_node)?;
+            
+            // Write the destination nodes
+            for dst_node in dst_nodes {
+                write!(writer, " {:-4}", dst_node)?;
+            }
+
+            // End the line
+            writeln!(writer)?;
+        }
+
+        Ok(())
+    }
+
     fn initialize(
         &mut self,
         stakes: &HashMap<Pubkey, u64>,
     ) {
+        self.clear_maps();
         for (pubkey, _) in stakes {
             // Initialize the `distances` hashmap with a distance of infinity for each node in the graph
             self.distances.insert(*pubkey, u64::MAX);
@@ -226,6 +283,7 @@ impl Cluster {
         stakes: &HashMap<Pubkey, u64>,
         node_map: &HashMap<Pubkey, &Node>,
     ) {
+
         //initialize BFS setup
         self.initialize(stakes);
 
@@ -243,9 +301,13 @@ impl Cluster {
             // need to get the actual node itself so we can get it's active_set and PASE
             let current_node = node_map.get(&current_node_pubkey).unwrap();
 
+            // insert current node into pushes map
+            self.pushes.insert(current_node_pubkey, HashSet::new());
+
             // For each peer of the current node's PASE (limit PUSH_FANOUT), 
             // update its distance and add it to the queue if it has not been visited
-            for neighbor in current_node
+            let mut pase_counter: usize = 0;
+            for (fanout_count, neighbor) in current_node
                 .active_set
                 .get_nodes(
                     &current_node.pubkey(), 
@@ -253,8 +315,26 @@ impl Cluster {
                     |_| false, 
                     stakes
                 )
-                .take(self.gossip_push_fanout) {
+                .take(self.gossip_push_fanout)
+                .enumerate() {
                     debug!("curr node, neighbor: {:?}, {:?}", current_node.pubkey(), neighbor);
+                    // if current_node_pubkey == Pubkey::from_str("B5GABybkqGaxxFE6bcN6TEejDF2tuz6yREciLhvvKyMp").unwrap() {
+                    //     info!("neighbor for KyMp: {:?}", neighbor);
+                    // }
+
+                    // add neighbor to current_node pushes map
+                    self.pushes
+                        .get_mut(&current_node_pubkey)
+                        .unwrap()
+                        .insert(*neighbor);
+
+                    // Ensure the neighbor hasn't pruned us!
+                    match self.prune_exists(neighbor, &current_node_pubkey) {
+                        Ok(true) => panic!("Error! we are pushing to a node that should be pruned!"), //neighbor has pruned us
+                        Ok(false) => (), // neighbor has pruned someone but not us
+                        Err(_) => (), // neighbor hasn't pruned anyone
+                    };
+
                     //check if we have visited this node before.
                     if !self.visited.contains(neighbor) {
                         // if not, we insert it
@@ -294,6 +374,35 @@ impl Cluster {
                         .get_mut(neighbor)
                         .unwrap()
                         .insert(current_node_pubkey, current_distance + 1);
+                    pase_counter = fanout_count;
+            }
+            if pase_counter + 1 != self.gossip_push_fanout {
+                warn!("for src_node {:?}", current_node_pubkey);
+                warn!("WARNING: Only pushed to {} nodes instead of the expected {} nodes!", pase_counter + 1, self.gossip_push_fanout);
+            }
+        }
+    }
+
+    pub fn prune_connections(
+        &mut self,
+        origin: &Pubkey,
+        node_map: &HashMap<Pubkey, &Node>,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        // process prunes as if we received them.
+        // dest sending prunes to all pubkeys in its hashset.
+        // so the pubkey in the hashset is going to be "this node" it is
+        // updating its map after its been pruned.
+        for (dest, prunes) in &self.prunes {
+            // prunes will be "this node"
+            // dest will peer (one sending message to us)
+            // origin is &node[0]. 
+            for self_pubkey in prunes.iter() {
+                let self_node = node_map
+                    .get(self_pubkey)
+                    .unwrap();
+
+                self_node.active_set.prune(self_pubkey, dest, &[*origin], stakes);
             }
         }
     }

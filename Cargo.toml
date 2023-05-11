@@ -21,7 +21,7 @@ solana-logger = { git = "https://github.com/solana-labs/solana" }
 solana-sdk = { git = "https://github.com/solana-labs/solana" }
 thiserror = "1.0.31"
 serde_yaml = "0.8.24"
-
+rand_chacha = "0.2.2"
 
 [dev-dependencies]
 rand_chacha = "0.2.2"
