@@ -1,10 +1,12 @@
 use {
     clap::{crate_description, crate_name, App, Arg, ArgMatches},
-    log::{error, info},
+    log::{error, info, warn},
     gossip_sim::{
         gossip::{make_gossip_cluster_from_rpc, make_gossip_cluster_from_map, Node, Cluster},
         API_MAINNET_BETA,
         Error,
+        gossip_stats::GossipStats,
+        Stats,
     },
     solana_client::rpc_client::RpcClient,
     solana_sdk::pubkey::Pubkey,
@@ -14,6 +16,7 @@ use {
         collections::HashMap,
         process::exit,
     },
+    rand::SeedableRng, rand_chacha::ChaChaRng,
 };
 
 fn parse_matches() -> ArgMatches {
@@ -54,6 +57,7 @@ pub fn run_gossip(
     stakes: &HashMap<Pubkey, /*stake:*/ u64>,
 ) -> Result<(), Error> {
     let mut rng = rand::thread_rng();
+    // let mut rng = ChaChaRng::from_seed([189u8; 32]);
     for node in nodes {
         node.run_gossip(&mut rng, stakes);
     }
@@ -108,7 +112,6 @@ fn main() {
         })
         .unzip();
 
-    
 
     // TODO: remove unstaked here?!
     //get all of the stakes here. map node pubkey => stake
@@ -132,20 +135,38 @@ fn main() {
     let mut cluster: Cluster = Cluster::new(GOSSIP_PUSH_FANOUT);
     let origin_pubkey = &nodes[0].pubkey(); //just a temp origin selection
 
-    info!("Calculating the MST for origin: {:?}", origin_pubkey);
-    cluster.new_mst(origin_pubkey, &stakes, &node_map);
-    info!("Calculation Complete. Printing results...");
-    cluster.print_hops();
-    cluster.print_node_orders();
+    
+    let mut number_of_poor_coverage_runs: u64 = 0;
+    let poor_coverage_threshold: f64 = 0.95;
+    let number_of_gossip_rounds = 1;
+    let mut stats = GossipStats::new();
+    for i in 0..number_of_gossip_rounds {
+        info!("MST ITERATION: {}", i);
+        info!("Calculating the MST for origin: {:?}", origin_pubkey);
+        cluster.new_mst(origin_pubkey, &stakes, &node_map);
+        info!("Calculation Complete. Printing results...");
+        cluster.print_hops();
+        // cluster.print_node_orders();
 
-    info!("Origin Node: {:?}", origin_pubkey);
-    cluster.print_mst();
-    cluster.print_prunes();
+        info!("Origin Node: {:?}", origin_pubkey);
+        cluster.print_mst();
+        // cluster.print_prunes();
 
-    let (coverage, stranded_nodes) = cluster.coverage(&stakes);
-    info!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
-    info!("{} nodes are stranded", stranded_nodes);
+        let (coverage, stranded_nodes) = cluster.coverage(&stakes);
+        info!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
+        info!("{} nodes are stranded", stranded_nodes);
+        if coverage < poor_coverage_threshold {
+            warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
+            number_of_poor_coverage_runs += 1;
+        }
+        stats.insert(coverage);
 
-    cluster.prune_connections(origin_pubkey, &node_map, &stakes);
+        // let _out = cluster.write_adjacency_list_to_file("../graph-viz/adjacency_list_pre.txt");
+        info!("################################################################");
+    }
+
+    stats.calculate_stats();
+    stats.print_stats();
+
 
 }

@@ -48,6 +48,8 @@ impl PushActiveSet {
         let stake = stakes.get(pubkey).min(stakes.get(origin));
         // based on the stake above, get the PushActiveSetEntry at that bucket.
         // 
+        debug!("num nodes in pase: {} for node: {:?}", self.get_entry(stake).get_nodes(origin, |_| false).count(), pubkey);
+        // info!("Node calling get_nodes(): {:?}", pubkey);
         self.get_entry(stake).get_nodes(origin, should_force_push)
     }
 
@@ -97,7 +99,6 @@ impl PushActiveSet {
         // actively push to for crds values belonging to this bucket.
         let mut bucket_index: u64 = 0;
         for (k, entry) in self.0.iter_mut().enumerate() {
-            // info!("greg pk: {:?}, PASE len: {}", self_pubkey, entry.0.len());
             let weights: Vec<u64> = buckets
                 .iter()
                 .map(|&bucket| {
@@ -117,8 +118,9 @@ impl PushActiveSet {
             bucket_index += 1;
             entry.rotate(rng, size, num_bloom_filter_items, nodes, &weights, self_pubkey);
         }
-        // let j = &self.0[0];
-        // info!("greg pk: {:?}, PAS[0].len post: {}", self_pubkey, j.0.len()); //all 18 at this point
+        // for j in self.0.iter() {
+        //     info!("greg pk: {:?}, PAS[0].len post: {}", self_pubkey, j.0.len()); //all 12 at this point
+        // }
     }
 
     fn get_entry(&self, stake: Option<&u64>) -> &PushActiveSetEntry {
@@ -145,6 +147,7 @@ impl PushActiveSetEntry {
         self.0
             .iter()
             .filter(move |(node, bloom_filter)| {
+                debug!("bloom filter contains origin: {} for peer: {:?}", bloom_filter.contains(origin), node); // if does contain, filter out
                 !bloom_filter.contains(origin) || should_force_push(node)
             })
             .map(|(node, _bloom_filter)| node)

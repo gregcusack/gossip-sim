@@ -10,6 +10,7 @@ use {
 pub const API_MAINNET_BETA: &str = "https://api.mainnet-beta.solana.com";
 pub const API_TESTNET: &str = "https://api.testnet.solana.com";
 
+pub mod gossip_stats;
 pub mod gossip;
 mod push_active_set;
 mod received_cache;
@@ -36,6 +37,25 @@ pub enum RouterError {
     NodeNotFound(Pubkey),
     #[error("channel send error")]
     SendError,
+}
+
+#[derive(Debug, Error)]
+pub enum Stats {
+    Mean(f64),
+    Median(f64),
+    Max(f64),
+    Min(f64),
+}
+
+impl std::fmt::Display for Stats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Stats::Mean(x) => write!(f, "Mean: {:.6}", x),
+            Stats::Median(x) => write!(f, "Median: {:.6}", x),
+            Stats::Max(x) => write!(f, "Max: {:.6}", x),
+            Stats::Min(x) => write!(f, "Min: {:.6}", x),
+        }
+    }
 }
 
 pub struct Router<T> {

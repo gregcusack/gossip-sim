@@ -165,8 +165,9 @@ D -> C
 ## Caveat
 - Currently just takes the first node in the account list and uses it as the origin! Can't specify origin yet.
 - Only simulates a single round of gossip. aka active_sets are rotated once at the beginning and the simulation runs for that state
-- We do not simulate pruning
+- We do not simulate pruning (WIP)
 - We do not simulate pull requests
+- MST is the true definition of an MST. BUT, in solana we want to maintain at least two incoming connections.
 
 ## Progress
 - [x] Initialize all node with respective stakes and simulated active_sets
@@ -179,6 +180,7 @@ D -> C
 - [x] write tests for above
 - [ ] implement pruning logic.
 - [ ] measure coverage for different `CRDS_GOSSIP_PUSH_FANOUT` and `CRDS_GOSSIP_PUSH_ACTIVE_SET_SIZE`
+- [ ] maintain minimum stake threshold and minimum incoming connections when pruning
 
 
 
