@@ -57,6 +57,10 @@ pub struct Cluster {
     // dst_pubkey => {src_pubkey, hops}
     prunes: HashMap<Pubkey, HashSet<Pubkey>>,
 
+    // get all nodes a src is pushing too
+    // src_node => dst_nodes {A, B, C, ..., N}
+    pushes: HashMap<Pubkey, HashSet<Pubkey>>,
+
 
 }
 
@@ -73,6 +77,7 @@ impl Cluster {
             orders: HashMap::new(),
             mst: HashMap::new(),
             prunes: HashMap::new(),
+            pushes: HashMap::new(),
         }
     }
 
@@ -85,6 +90,7 @@ impl Cluster {
         self.orders.clear();
         self.mst.clear();
         self.prunes.clear();
+        self.pushes.clear();
     }
 
     pub fn get_outbound_degree(
@@ -225,6 +231,18 @@ impl Cluster {
         }
     }
 
+    pub fn print_pushes(
+        &self,
+    ) {
+        info!("PUSHES: ");
+        for (src, dests) in &self.pushes {
+            info!("************* SRC: {:?}, # {} *************", src, dests.len());
+            for dst in dests {
+                info!("Dest: {:?}", dst);
+            }
+        }
+    }
+
     pub fn write_adjacency_list_to_file(
         &self,
         filename: &str,
@@ -283,6 +301,9 @@ impl Cluster {
             // need to get the actual node itself so we can get it's active_set and PASE
             let current_node = node_map.get(&current_node_pubkey).unwrap();
 
+            // insert current node into pushes map
+            self.pushes.insert(current_node_pubkey, HashSet::new());
+
             // For each peer of the current node's PASE (limit PUSH_FANOUT), 
             // update its distance and add it to the queue if it has not been visited
             let mut pase_counter: usize = 0;
@@ -300,6 +321,12 @@ impl Cluster {
                     // if current_node_pubkey == Pubkey::from_str("B5GABybkqGaxxFE6bcN6TEejDF2tuz6yREciLhvvKyMp").unwrap() {
                     //     info!("neighbor for KyMp: {:?}", neighbor);
                     // }
+
+                    // add neighbor to current_node pushes map
+                    self.pushes
+                        .get_mut(&current_node_pubkey)
+                        .unwrap()
+                        .insert(*neighbor);
 
                     // Ensure the neighbor hasn't pruned us!
                     match self.prune_exists(neighbor, &current_node_pubkey) {
@@ -362,6 +389,10 @@ impl Cluster {
         node_map: &HashMap<Pubkey, &Node>,
         stakes: &HashMap<Pubkey, u64>,
     ) {
+        // process prunes as if we received them.
+        // dest sending prunes to all pubkeys in its hashset.
+        // so the pubkey in the hashset is going to be "this node" it is
+        // updating its map after its been pruned.
         for (dest, prunes) in &self.prunes {
             // prunes will be "this node"
             // dest will peer (one sending message to us)
@@ -375,8 +406,6 @@ impl Cluster {
             }
         }
     }
-
-    // pub fn 
 }
 
 

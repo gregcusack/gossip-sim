@@ -1,6 +1,6 @@
 use {
     clap::{crate_description, crate_name, App, Arg, ArgMatches},
-    log::{error, info, warn},
+    log::{error, info, warn, Level},
     gossip_sim::{
         gossip::{make_gossip_cluster_from_rpc, make_gossip_cluster_from_map, Node, Cluster},
         API_MAINNET_BETA,
@@ -161,7 +161,12 @@ fn main() {
         }
         stats.insert(coverage);
 
+        if log::log_enabled!(Level::Debug) {
+            cluster.print_pushes();
+        }
+
         // let _out = cluster.write_adjacency_list_to_file("../graph-viz/adjacency_list_pre.txt");
+        cluster.prune_connections(origin_pubkey, &node_map, &stakes);
         info!("################################################################");
     }
 
