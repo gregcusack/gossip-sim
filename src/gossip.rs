@@ -25,6 +25,13 @@ use {
 #[cfg_attr(test, cfg(test))]
 pub(crate) const CRDS_UNIQUE_PUBKEY_CAPACITY: usize = 8192;
 
+#[derive(Clone, Copy, Debug)]
+pub struct Config {
+    pub gossip_push_fanout: usize,
+    pub gossip_active_set_size: usize,
+    pub gossip_iterations: usize, 
+    pub accounts_from_file: bool,
+}
 
 pub struct Cluster {
     gossip_push_fanout: usize,
@@ -464,14 +471,15 @@ impl Node {
         &mut self,
         rng: &mut R,
         stakes: &HashMap<Pubkey, u64>,
+        active_set_size: usize,
     )  {
-        self.rotate_active_set(rng, 6usize, stakes);
+        self.rotate_active_set(rng, active_set_size, stakes);
     } 
 
     fn rotate_active_set<R: Rng>(
         &mut self,
         rng: &mut R,
-        gossip_push_fanout: usize,
+        active_set_size: usize,
         stakes: &HashMap<Pubkey, u64>,
     ) {
         // Gossip nodes to be sampled for each push active set.
@@ -493,7 +501,7 @@ impl Node {
         // note the gossip_push_fanout * 3 is equivalent to CRDS_GOSSIP_PUSH_ACTIVE_SET_SIZE in solana
         // note, here the default is 6*3=18. but in solana it is 6*2=12
         self.active_set
-            .rotate(rng, gossip_push_fanout * 2, cluster_size, &nodes, stakes, self.pubkey());
+            .rotate(rng, active_set_size, cluster_size, &nodes, stakes, self.pubkey());
     }
 
 }

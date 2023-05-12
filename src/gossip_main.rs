@@ -1,12 +1,20 @@
 use {
-    clap::{crate_description, crate_name, App, Arg, ArgMatches},
+    clap::{crate_description, crate_name, App, Arg, ArgMatches, value_t_or_exit},
     log::{error, info, warn, Level},
     gossip_sim::{
-        gossip::{make_gossip_cluster_from_rpc, make_gossip_cluster_from_map, Node, Cluster},
         API_MAINNET_BETA,
         Error,
-        gossip_stats::GossipStats,
-        gossip_stats::HopsStat,
+        gossip::{
+            make_gossip_cluster_from_rpc, 
+            make_gossip_cluster_from_map,
+            Node,
+            Cluster,
+            Config,
+        },
+        gossip_stats::{
+            GossipStats,
+            HopsStat,
+        },
     },
     solana_client::rpc_client::RpcClient,
     solana_sdk::pubkey::Pubkey,
@@ -16,6 +24,7 @@ use {
         collections::HashMap,
         process::exit,
     },
+
     rand::SeedableRng, rand_chacha::ChaChaRng,
 };
 
@@ -45,21 +54,41 @@ fn parse_matches() -> ArgMatches {
                 .takes_value(false)
                 .help("set to read in key/stake pairs from yaml. use with --acount-file <path>"),
         )
+        .arg(
+            Arg::with_name("gossip_push_fanout")
+                .long("push-fanout")
+                .takes_value(true)
+                .default_value("6")
+                .help("gossip push fanout"),
+        )
+        .arg(
+            Arg::with_name("gossip_push_active_set_entry_size")
+                .long("active-set-size")
+                .takes_value(true)
+                .default_value("12")
+                .help("gossip push active set entry size"),
+        )
+        .arg(
+            Arg::with_name("gossip_iterations")
+                .long("iterations")
+                .takes_value(true)
+                .default_value("1")
+                .help("gossip iterations"),
+        )
         .get_matches()
 }
-
-const GOSSIP_PUSH_FANOUT: usize = 6;
 
 
 pub fn run_gossip(
     // nodes: &[RwLock<Node>],
     nodes: &mut Vec<Node>,
     stakes: &HashMap<Pubkey, /*stake:*/ u64>,
+    active_set_size: usize,
 ) -> Result<(), Error> {
     let mut rng = rand::thread_rng();
     // let mut rng = ChaChaRng::from_seed([189u8; 32]);
     for node in nodes {
-        node.run_gossip(&mut rng, stakes);
+        node.run_gossip(&mut rng, stakes, active_set_size);
     }
     
     Ok(())
@@ -73,12 +102,18 @@ fn main() {
 
     let matches = parse_matches();
 
+    let config = Config {
+        gossip_push_fanout: value_t_or_exit!(matches, "gossip_push_fanout", usize),
+        gossip_active_set_size: value_t_or_exit!(matches, "gossip_push_active_set_entry_size", usize),
+        gossip_iterations: value_t_or_exit!(matches, "gossip_iterations", usize),
+        accounts_from_file: matches.is_present("accounts_from_yaml"),
+    };
+
     // check if we want to write keys and stakes to a file
     let account_file = matches.value_of("account_file").unwrap_or_default();
 
     // check if we want to read in pubkeys/stakes from a file
-    let get_pubkeys_and_stake_from_file: bool = matches.is_present("accounts_from_yaml");
-    let nodes = if get_pubkeys_and_stake_from_file {
+    let nodes = if config.accounts_from_file {
         // READ ACCOUNTS FROM FILE
         if account_file.is_empty() {
             error!("Failed to pass in account file to read from with --accounts-from-yaml flag. need --acount-file <path>");
@@ -123,7 +158,7 @@ fn main() {
     
     //collect vector of nodes
     info!("Simulating Gossip and setting active sets. Please wait.....");
-    let _res = run_gossip(&mut nodes, &stakes).unwrap();
+    let _res = run_gossip(&mut nodes, &stakes, config.gossip_active_set_size).unwrap();
     info!("Simulation Complete!");
 
 
@@ -132,15 +167,14 @@ fn main() {
         .map(|node| (node.pubkey(), node))
         .collect();
 
-    let mut cluster: Cluster = Cluster::new(GOSSIP_PUSH_FANOUT);
+    let mut cluster: Cluster = Cluster::new(config.gossip_push_fanout);
     let origin_pubkey = &nodes[0].pubkey(); //just a temp origin selection
 
     
-    let mut number_of_poor_coverage_runs: u64 = 0;
+    let mut number_of_poor_coverage_runs: usize = 0;
     let poor_coverage_threshold: f64 = 0.95;
-    let number_of_gossip_rounds = 1;
     let mut stats = GossipStats::default();
-    for i in 0..number_of_gossip_rounds {
+    for i in 0..config.gossip_iterations {
         info!("MST ITERATION: {}", i);
         info!("Calculating the MST for origin: {:?}", origin_pubkey);
         cluster.new_mst(origin_pubkey, &stakes, &node_map);
