@@ -667,15 +667,17 @@ mod tests {
         rng: &mut ChaChaRng,
         nodes: &mut Vec<Node>,
         stakes: &HashMap<Pubkey, /*stake:*/ u64>,
+        active_set_size: usize,
     ) {
         for node in nodes {
-            node.run_gossip(rng, stakes);
+            node.run_gossip(rng, stakes, active_set_size);
         }
     }
 
     #[test]
     fn test_mst() {
         const PUSH_FANOUT: usize = 2;
+        const ACTIVE_SET_SIZE: usize = 12;
         let nodes: Vec<_> = repeat_with(Pubkey::new_unique).take(5).collect();
         const MAX_STAKE: u64 = (1 << 20) * LAMPORTS_PER_SOL;
         let mut rng = ChaChaRng::from_seed([189u8; 32]);
@@ -699,7 +701,7 @@ mod tests {
         nodes.sort_by_key(|node| node.pubkey() );
 
         // setup gossip
-        run_gossip(&mut rng, &mut nodes, &stakes);
+        run_gossip(&mut rng, &mut nodes, &stakes, ACTIVE_SET_SIZE);
     
         let node_map: HashMap<Pubkey, &Node> = nodes
             .iter()
