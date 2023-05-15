@@ -48,7 +48,7 @@ pub enum HopsStats {
 }
 
 #[derive(Debug, Error)]
-pub enum CoverageStats {
+pub enum Stats {
     Mean(f64),
     Median(f64),
     Max(f64),
@@ -58,21 +58,21 @@ pub enum CoverageStats {
 impl std::fmt::Display for HopsStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HopsStats::Mean(x) => write!(f, "Mean Hops: {:.6}", x),
-            HopsStats::Median(x) => write!(f, "Median Hops: {:.2}", x),
-            HopsStats::Max(x) => write!(f, "Max Hops: {}", x),
-            HopsStats::Min(x) => write!(f, "Min Hops: {}", x),
+            HopsStats::Mean(x) => write!(f, "Mean: {:.6}", x),
+            HopsStats::Median(x) => write!(f, "Median: {:.2}", x),
+            HopsStats::Max(x) => write!(f, "Max: {}", x),
+            HopsStats::Min(x) => write!(f, "Min: {}", x),
         }
     }
 }
 
-impl std::fmt::Display for CoverageStats {
+impl std::fmt::Display for Stats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CoverageStats::Mean(x) => write!(f, "Mean Coverage: {:.6}", x),
-            CoverageStats::Median(x) => write!(f, "Median Coverage: {:.6}", x),
-            CoverageStats::Max(x) => write!(f, "Max Coverage: {:.6}", x),
-            CoverageStats::Min(x) => write!(f, "Min Coverage: {:.6}", x),
+            Stats::Mean(x) => write!(f, "Mean: {:.6}", x),
+            Stats::Median(x) => write!(f, "Median: {:.6}", x),
+            Stats::Max(x) => write!(f, "Max: {:.6}", x),
+            Stats::Min(x) => write!(f, "Min: {:.6}", x),
         }
     }
 }

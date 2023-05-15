@@ -1,40 +1,10 @@
 
 use {
-    crate::{CoverageStats, HopsStats},
+    crate::{Stats, HopsStats},
     log::info,
     std::collections::HashMap,
     solana_sdk::pubkey::Pubkey,
 };
-
-// if we run multiple MSTs, this will keep track of the hops
-// over the course of multiple runs.
-pub struct HopsStatCollection {
-    stats: Vec<HopsStat>,
-}
-
-impl Default for HopsStatCollection {
-    fn default() -> Self {
-        Self {
-            stats: Vec::default(),
-        }
-    }
-}
-
-impl HopsStatCollection {
-    pub fn insert(
-        &mut self,
-        stat: HopsStat,
-    ) {
-        self.stats.push(stat);
-    }
-
-    pub fn get_stat_by_iteration(
-        &self,
-        index: usize,
-    ) -> &HopsStat {
-        &self.stats[index]
-    }
-}
 
 // stores stats about a single run of mst. 
 pub struct HopsStat {
@@ -61,17 +31,23 @@ impl HopsStat {
     ) -> HopsStat {
         let mut hops: Vec<u64> = distances.values().cloned().collect();
         hops.sort();
+
+        let hops: Vec<u64> = hops
+            .iter()
+            .filter(|&v| *v != u64::MAX)
+            .cloned()
+            .collect();
         let count = hops.len();
 
         // Calculate the mean filter out nodes that haven't been visited and have a dist of u64::MAX
         let mean = hops
             .iter()
-            .filter(|&v| *v != u64::MAX)
             .sum::<u64>() as f64 / count as f64;
 
         // Calculate the median
         let median = if count % 2 == 0 {
             let mid = count / 2;
+
             (hops[mid - 1] + hops[mid]) as f64 / 2.0
         } else {
             hops[count / 2] as f64
@@ -128,30 +104,60 @@ impl HopsStat {
     pub fn print_stats (
         &self,
     ) {
-        info!("{}", self.mean);
-        info!("{}", self.median);
-        info!("{}", self.max);
-        info!("{}", self.min);
+        info!("Hops {}", self.mean);
+        info!("Hops {}", self.median);
+        info!("Hops {}", self.max);
+        info!("Hops {}", self.min);
     }
     
 }
 
+// if we run multiple MSTs, this will keep track of the hops
+// over the course of multiple runs.
+pub struct HopsStatCollection {
+    stats: Vec<HopsStat>,
+}
+
+impl Default for HopsStatCollection {
+    fn default() -> Self {
+        Self {
+            stats: Vec::default(),
+        }
+    }
+}
+
+impl HopsStatCollection {
+    pub fn insert(
+        &mut self,
+        stat: HopsStat,
+    ) {
+        self.stats.push(stat);
+    }
+
+    pub fn get_stat_by_iteration(
+        &self,
+        index: usize,
+    ) -> &HopsStat {
+        &self.stats[index]
+    }
+}
+
 pub struct CoverageStatsCollection {
     coverages: Vec<f64>,
-    mean: CoverageStats,
-    median: CoverageStats,
-    max: CoverageStats,
-    min: CoverageStats,
+    mean: Stats,
+    median: Stats,
+    max: Stats,
+    min: Stats,
 }
 
 impl Default for CoverageStatsCollection {
     fn default() -> Self {
-        CoverageStatsCollection {
+        Self {
             coverages: Vec::default(),
-            mean: CoverageStats::Mean(0.0),
-            median: CoverageStats::Median(0.0),
-            max: CoverageStats::Max(0.0),
-            min: CoverageStats::Min(0.0),
+            mean: Stats::Mean(0.0),
+            median: Stats::Median(0.0),
+            max: Stats::Max(0.0),
+            min: Stats::Min(0.0),
         }
     }
 }
@@ -180,37 +186,178 @@ impl CoverageStatsCollection {
             .first()
             .unwrap_or(&0.0);
 
-        self.mean = CoverageStats::Mean(mean);
-        self.median = CoverageStats::Median(median);
-        self.max = CoverageStats::Max(max);
-        self.min = CoverageStats::Min(min);
+        self.mean = Stats::Mean(mean);
+        self.median = Stats::Median(median);
+        self.max = Stats::Max(max);
+        self.min = Stats::Min(min);
     }
 
     pub fn print_stats (
         &self,
     ) {
         info!("Number of iterations: {}", self.coverages.len());
-        info!("{}", self.mean);
-        info!("{}", self.median);
-        info!("{}", self.max);
-        info!("{}", self.min);
+        info!("Coverages: {}", self.coverages
+            .iter()
+            .map(|n| format!("{:.6}", n))
+            .collect::<Vec<String>>()
+            .join(", ")
+        );
+        info!("Coverage {}", self.mean);
+        info!("Coverage {}", self.median);
+        info!("Coverage {}", self.max);
+        info!("Coverage {}", self.min);
     }    
+}
+
+// RMR = m / (n - 1) - 1
+// m: total number of payload messages exchanged during gossip (push/prune)
+// n: total number of nodes that receive the message
+pub struct RelativeMessageRedundancy {
+    m: u64,
+    n: u64,
+    rmr: f64,
+}
+
+impl Default for RelativeMessageRedundancy {
+    fn default() -> Self {
+        RelativeMessageRedundancy { 
+            m: 0,
+            n: 0,
+            rmr: 0.0,
+        }
+    }
+}
+
+impl RelativeMessageRedundancy {
+    pub fn increment_m(
+        &mut self,
+    ) {
+        self.m += 1;
+    }
+
+    pub fn increment_n(
+        &mut self,
+    ) {
+        self.n += 1;
+    }
+
+    pub fn reset(
+        &mut self,
+    ) {
+        self.m = 0;
+        self.n = 0;
+        self.rmr = 0.0;
+    }
+
+    pub fn calculate_rmr(
+        &mut self,
+    ) -> Result<f64, String> {
+        if self.n == 0 {
+            Err("Division by zero. n is 0.".to_string())
+        } else {
+            self.rmr = self.m as f64 / (self.n - 1) as f64 - 1.0;
+            Ok(self.rmr)
+        }
+    }
+
+    pub fn rmr(
+        &self,
+    ) -> f64 {
+        self.rmr
+    }
+
+}
+
+impl std::fmt::Display for RelativeMessageRedundancy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "m: {}, n: {}, rmr: {:.6}", self.m, self.n, self.rmr)
+    }
+}
+
+pub struct RelativeMessageRedundancyCollection {
+    rmrs: Vec<f64>,
+    mean: Stats,
+    median: Stats,
+    max: Stats,
+    min: Stats,
+}
+
+impl Default for RelativeMessageRedundancyCollection {
+    fn default() -> Self {
+        Self {
+            rmrs: Vec::default(),
+            mean: Stats::Mean(0.0),
+            median: Stats::Median(0.0),
+            max: Stats::Max(0.0),
+            min: Stats::Min(0.0),
+        }
+    }
+}
+
+impl RelativeMessageRedundancyCollection {
+    pub fn calculate_stats (
+        &mut self,
+    ) {
+        self.rmrs
+            .sort_by(|a, b| a
+                    .partial_cmp(b)
+                    .unwrap());
+        let len = self.rmrs.len();
+        let mean = self.rmrs
+            .iter()
+            .sum::<f64>() / len as f64;
+        let median = if len % 2 == 0 {
+            info!("len: {}", len);
+            (self.rmrs[len / 2 - 1] + self.rmrs[len / 2]) / 2.0
+        } else {
+            self.rmrs[len / 2]
+        };
+        let max = *self.rmrs
+            .last()
+            .unwrap_or(&0.0);
+        let min = *self.rmrs
+            .first()
+            .unwrap_or(&0.0);
+
+        self.mean = Stats::Mean(mean);
+        self.median = Stats::Median(median);
+        self.max = Stats::Max(max);
+        self.min = Stats::Min(min);
+    }
+
+    pub fn print_stats (
+        &self,
+    ) {
+        info!("Number of iterations: {}", self.rmrs.len());
+        info!("RMRs: {}", self.rmrs
+            .iter()
+            .rev()
+            .map(|n| format!("{:.6}", n))
+            .collect::<Vec<String>>()
+            .join(", ")
+        );
+        info!("RMR {}", self.mean);
+        info!("RMR {}", self.median);
+        info!("RMR {}", self.max);
+        info!("RMR {}", self.min);
+    }
 }
 
 pub struct GossipStats {
     hops_stats: HopsStatCollection,
     coverage_stats: CoverageStatsCollection,
+    relative_message_redundancy_stats: RelativeMessageRedundancyCollection,
 }
 
 impl Default for GossipStats {
     fn default() -> Self {
         GossipStats { 
             hops_stats: HopsStatCollection::default(), 
-            coverage_stats: CoverageStatsCollection::default() 
+            coverage_stats: CoverageStatsCollection::default(),
+            relative_message_redundancy_stats: RelativeMessageRedundancyCollection::default(),
         }
     }
 }
-
 
 impl GossipStats {
 
@@ -224,11 +371,14 @@ impl GossipStats {
     pub fn print_hops_stats(
         &self,
     ) {
+        info!("|------------------------|");
+        info!("|------ HOPS STATS ------|");
+        info!("|------------------------|");         
         for (iteration, stat) in self.hops_stats
             .stats
             .iter()
             .enumerate() {
-                info!("For Iteration: {}", iteration);
+                info!("Iteration: {}", iteration);
                 stat.print_stats();
         }
     }
@@ -249,7 +399,42 @@ impl GossipStats {
     pub fn print_coverage_stats(
         &self,
     ) {
+        info!("|------------------------|");
+        info!("|---- COVERAGE STATS ----|");
+        info!("|------------------------|"); 
         self.coverage_stats.print_stats();
+    }
+
+    pub fn insert_rmr(
+        &mut self,
+        rmr: f64,
+    ) {
+        self.relative_message_redundancy_stats.rmrs.push(rmr);
+    }
+
+    pub fn calculate_rmr_stats(
+        &mut self,
+    ) {
+        self.relative_message_redundancy_stats.calculate_stats();
+    }
+
+    pub fn print_rmr_stats(
+        &self,
+    ) {
+        info!("|-------------------------------------------------|");
+        info!("|---- RELATIVE MESSAGE REDUNDANCY (RMR) STATS ----|");
+        info!("|-------------------------------------------------|"); 
+        self.relative_message_redundancy_stats.print_stats();
+    }
+
+    pub fn print_all(
+        &mut self,
+    ) {
+        self.calculate_coverage_stats();
+        self.print_coverage_stats();
+        self.calculate_rmr_stats();
+        self.print_rmr_stats();
+        self.print_hops_stats();
     }
 
 }
