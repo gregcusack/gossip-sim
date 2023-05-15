@@ -58,12 +58,12 @@ cargo run --bin write-accounts -- --num-nodes <num-nodes> --account-file <path-t
 - Read accounts from the file you created in (Option 1) and simulate the network
     - Note it will simulate all of the accounts in the file. 
 ```
-cargo run --bin gossip-sim -- --account-file `<path-to-yaml-file>` --accounts-from-yaml
+cargo run --bin gossip-sim -- --account-file <path-to-yaml-file> --accounts-from-yaml --push-fanout <push_fanout> --active-set-size <active_set_size> --iterations <number_of_gossip_iterations> --origin-rank <origin_stake_rank>
 ```
 #### Option 3: Pull accounts from mainnet and run simulation
-- This will pull all node accounts from mainnet and simulate the network. It will use zero-staked nodes.
+- This will pull all node accounts from mainnet and simulate the network.
 ```
-cargo run --bin gossip-sim
+cargo run --bin gossip-sim -- --account-file `<path-to-yaml-file>` --accounts-from-yaml --push-fanout <push_fanout> --active-set-size <active_set_size> --iterations <number_of_gossip_iterations> --origin-rank <origin_stake_rank>
 ```
 
 ## Interpreting the output
@@ -175,6 +175,8 @@ D -> C
 - [x] Determine the minimum number of hops the message takes to reach all nodes in the network
 - [x] For a given destination node and its inbound neighbors, determine which neighbor was first, second, third, etc to deliver the message
 - [x] Determine coverage of network. # of nodes Rx message / # of nodes in network.
+- [x] Measure Relative Message Redundancy (RMR)
+- [x] Measure Last Hop Delivery (LHD)
 - [x] Identify MST src->vec<dest>
 - [x] Identify dest->vec<src> prunes
 - [x] write tests for above
