@@ -21,8 +21,13 @@ use {
     std::{
         fs::{File}, 
         path::Path, 
-        collections::HashMap,
+        collections::{HashMap, BinaryHeap},
         process::exit,
+        hash::{
+            BuildHasher,
+            Hash,
+        },
+        cmp::Reverse,
     },
 
     rand::SeedableRng, rand_chacha::ChaChaRng,
@@ -75,6 +80,20 @@ fn parse_matches() -> ArgMatches {
                 .default_value("1")
                 .help("gossip iterations"),
         )
+        .arg(
+            Arg::with_name("origin_rank")
+                .long("origin-rank")
+                .takes_value(true)
+                .default_value("1")
+                .validator(|s| match s.parse::<usize>() {
+                    Ok(n) if n >= 1 => Ok(()),
+                    _ => Err(String::from("origin_rank must be at least 1")),
+                })
+                .help("Select an origin with origin rank for gossip.
+                    e.g.    10 -> 10th largest stake
+                            1000 -> 1000th largest stake
+                    Default is largest stake as origin"),
+        )
         .get_matches()
 }
 
@@ -94,6 +113,19 @@ pub fn run_gossip(
     Ok(())
 }
 
+fn find_nth_largest_node(n: usize, nodes: &[Node]) -> Option<&Node> {
+    let mut heap = BinaryHeap::new();
+    for node in nodes {
+        if heap.len() < n {
+            heap.push(Reverse(node.stake()));
+        } else if node.stake() >= heap.peek().unwrap().0 {
+            heap.pop();
+            heap.push(Reverse(node.stake()));
+        }
+    }
+    heap.peek().map(|Reverse(stake)| nodes.iter().find(|node| node.stake() == *stake)).flatten()
+}
+
 fn main() {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "INFO");
@@ -107,6 +139,7 @@ fn main() {
         gossip_active_set_size: value_t_or_exit!(matches, "gossip_push_active_set_entry_size", usize),
         gossip_iterations: value_t_or_exit!(matches, "gossip_iterations", usize),
         accounts_from_file: matches.is_present("accounts_from_yaml"),
+        origin_rank: value_t_or_exit!(matches, "origin_rank", usize),
     };
 
     // check if we want to write keys and stakes to a file
@@ -147,6 +180,10 @@ fn main() {
         })
         .unzip();
 
+    if nodes.len() < config.origin_rank {
+        panic!("ERROR: origin_rank larger than number of simulation nodes. \
+            nodes.len(): {}, origin_rank: {}", nodes.len(), config.origin_rank);
+    }
 
     // TODO: remove unstaked here?!
     //get all of the stakes here. map node pubkey => stake
@@ -168,9 +205,11 @@ fn main() {
         .collect();
 
     let mut cluster: Cluster = Cluster::new(config.gossip_push_fanout);
-    let origin_pubkey = &nodes[0].pubkey(); //just a temp origin selection
 
-    
+    let origin_node = find_nth_largest_node(config.origin_rank, &nodes).unwrap();
+    let origin_pubkey = &origin_node.pubkey();
+
+    info!("ORIGIN: {:?}", origin_pubkey);
     let mut number_of_poor_coverage_runs: usize = 0;
     let poor_coverage_threshold: f64 = 0.95;
     let mut stats = GossipStats::default();
@@ -216,6 +255,76 @@ fn main() {
     stats.calculate_coverage_stats();
     stats.print_coverage_stats();
     stats.print_hops_stats();
+
+
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        // super::*,
+        rand::SeedableRng, rand_chacha::ChaChaRng, std::iter::repeat_with,
+        rand::Rng,
+        solana_sdk::{pubkey::Pubkey},
+        std::{
+            collections::{BinaryHeap},
+            time::Instant,
+            cmp::Reverse,
+        },
+        solana_sdk::native_token::LAMPORTS_PER_SOL,
+        log::info,
+    };
+
+    pub struct Node {
+        pub pubkey: Pubkey,
+        pub stake: u64,
+    }
+
+    fn create_nodes(stakes: Vec<u64>) -> Vec<Node> {
+        let mut nodes = Vec::new();
+    
+        for stake in stakes {
+            let pubkey = Pubkey::new_unique();
+            let node = Node {
+                pubkey,
+                stake,
+            };
+            nodes.push(node);
+        }
+    
+        nodes
+    }
+    
+    fn find_nth_largest_node(n: usize, nodes: &[Node]) -> Option<&Node> {
+        let mut heap = BinaryHeap::new();
+        for node in nodes {
+            if heap.len() < n {
+                heap.push(Reverse(node.stake));
+            } else if node.stake >= heap.peek().unwrap().0 {
+                heap.pop();
+                heap.push(Reverse(node.stake));
+            }
+        }
+        heap.peek().map(|Reverse(stake)| nodes.iter().find(|node| node.stake == *stake)).flatten()
+    }
+    
+
+
+    #[test]
+    fn test_nth_largest() {
+        let stakes: Vec<u64> = vec![10, 123, 67, 18, 29, 567, 12, 5, 875, 234, 12, 5, 76, 0, 12354, 985];
+        let ranks: Vec<usize> = vec![5, 10, 12, 1, 6, 2, 9, 16];
+        let res: Vec<u64> = vec![234, 18, 12, 12354, 123, 985, 29, 0];
+
+        let nodes = create_nodes(stakes);
+
+        for (index, r) in ranks.iter().enumerate() {
+            let origin_node = find_nth_largest_node(*r, &nodes[..]).unwrap();
+            let stake = origin_node.stake;
+            assert_eq!(stake, res[index]);
+        }
+    }
+
 
 
 }

@@ -31,6 +31,7 @@ pub struct Config {
     pub gossip_active_set_size: usize,
     pub gossip_iterations: usize, 
     pub accounts_from_file: bool,
+    pub origin_rank: usize,
 }
 
 pub struct Cluster {
