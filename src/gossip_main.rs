@@ -255,8 +255,6 @@ fn main() {
     stats.calculate_coverage_stats();
     stats.print_coverage_stats();
     stats.print_hops_stats();
-
-
 }
 
 #[cfg(test)]
@@ -307,8 +305,6 @@ mod tests {
         }
         heap.peek().map(|Reverse(stake)| nodes.iter().find(|node| node.stake == *stake)).flatten()
     }
-    
-
 
     #[test]
     fn test_nth_largest() {
@@ -324,7 +320,4 @@ mod tests {
             assert_eq!(stake, res[index]);
         }
     }
-
-
-
 }
