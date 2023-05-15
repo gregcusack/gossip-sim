@@ -94,6 +94,18 @@ fn parse_matches() -> ArgMatches {
                             1000 -> 1000th largest stake
                     Default is largest stake as origin"),
         )
+        .arg(
+            Arg::with_name("active_set_rotation_probability")
+                .long("rotation-probability")
+                .short('p')
+                .takes_value(true)
+                .default_value(".01")
+                .validator(|s| match s.parse::<f64>() {
+                    Ok(n) if n >= 0.0 && n <= 1.0 => Ok(()),
+                    _ => Err(String::from("active_set_rotation_probability must be between 0 and 1")),
+                })
+                .help("After each round of gossip, rotate a node's active set with a set probability 0 <= p <= 1"),
+        )
         .get_matches()
 }
 
@@ -140,6 +152,7 @@ fn main() {
         gossip_iterations: value_t_or_exit!(matches, "gossip_iterations", usize),
         accounts_from_file: matches.is_present("accounts_from_yaml"),
         origin_rank: value_t_or_exit!(matches, "origin_rank", usize),
+        probability_of_rotation: value_t_or_exit!(matches, "active_set_rotation_probability", f64),
     };
 
     // check if we want to write keys and stakes to a file
@@ -198,12 +211,6 @@ fn main() {
     let _res = run_gossip(&mut nodes, &stakes, config.gossip_active_set_size).unwrap();
     info!("Simulation Complete!");
 
-
-    let node_map: HashMap<Pubkey, &Node> = nodes
-        .iter()
-        .map(|node| (node.pubkey(), node))
-        .collect();
-
     let mut cluster: Cluster = Cluster::new(config.gossip_push_fanout);
 
     let origin_node = find_nth_largest_node(config.origin_rank, &nodes).unwrap();
@@ -216,47 +223,63 @@ fn main() {
     for i in 0..config.gossip_iterations {
         info!("MST ITERATION: {}", i);
         info!("Calculating the MST for origin: {:?}", origin_pubkey);
-        cluster.new_mst(origin_pubkey, &stakes, &node_map);
-        info!("Calculation Complete. Printing results...");
-        cluster.print_hops();
-        // cluster.print_node_orders();
+        {
+            let node_map: HashMap<Pubkey, &Node> = nodes
+                .iter()
+                .map(|node| (node.pubkey(), node))
+                .collect();
+            cluster.new_mst(origin_pubkey, &stakes, &node_map);
+        
+            info!("Calculation Complete. Printing results...");
+            cluster.print_hops();
+            // cluster.print_node_orders();
 
-        info!("Origin Node: {:?}", origin_pubkey);
-        cluster.print_mst();
-        // cluster.print_prunes();
+            info!("Origin Node: {:?}", origin_pubkey);
+            cluster.print_mst();
+            // cluster.print_prunes();
 
-        let (coverage, stranded_nodes) = cluster.coverage(&stakes);
-        info!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
-        info!("{} nodes are stranded", stranded_nodes);
-        if stranded_nodes > 0 {
-            cluster.stranded_nodes(&stakes);
+            let (coverage, stranded_nodes) = cluster.coverage(&stakes);
+            info!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
+            info!("{} nodes are stranded", stranded_nodes);
+            if stranded_nodes > 0 {
+                cluster.stranded_nodes(&stakes);
+            }
+            if coverage < poor_coverage_threshold {
+                warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
+                number_of_poor_coverage_runs += 1;
+            }
+        
+            stats.insert_coverage(coverage);
+            stats.insert_hops_stat(
+                HopsStat::new(
+                    cluster.get_distances()
+                )
+            );
+
+            if log::log_enabled!(Level::Debug) {
+                cluster.print_pushes();
+            }
+
+            match cluster.relative_message_redundancy() {
+                Ok(result) => {
+                    info!("Network RMR: {:.6}", result);
+                    stats.insert_rmr(result);
+                },
+                Err(_) => error!("Network RMR error. # of nodes is 1."),
+            }
+
+        // // let _out = cluster.write_adjacency_list_to_file("../graph-viz/adjacency_list_pre.txt");
+        
+        //     let node_map: HashMap<Pubkey, &Node> = nodes
+        //         .iter()
+        //         .map(|node| (node.pubkey(), node))
+        //         .collect();
+            cluster.prune_connections(origin_pubkey, &node_map, &stakes);
         }
-        if coverage < poor_coverage_threshold {
-            warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
-            number_of_poor_coverage_runs += 1;
-        }
-      
-        stats.insert_coverage(coverage);
-        stats.insert_hops_stat(
-            HopsStat::new(
-                cluster.get_distances()
-            )
-        );
 
-        if log::log_enabled!(Level::Debug) {
-            cluster.print_pushes();
-        }
+        let mut rng = rand::thread_rng();
+        cluster.chance_to_rotate(&mut rng, &mut nodes, config.gossip_active_set_size, &stakes, config.probability_of_rotation);
 
-        match cluster.relative_message_redundancy() {
-            Ok(result) => {
-                info!("Network RMR: {:.6}", result);
-                stats.insert_rmr(result);
-            },
-            Err(_) => error!("Network RMR error. # of nodes is 1."),
-        }
-
-        // let _out = cluster.write_adjacency_list_to_file("../graph-viz/adjacency_list_pre.txt");
-        cluster.prune_connections(origin_pubkey, &node_map, &stakes);
         info!("################################################################");
     }
 

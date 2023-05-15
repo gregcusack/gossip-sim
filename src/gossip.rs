@@ -32,6 +32,7 @@ pub struct Config {
     pub gossip_iterations: usize, 
     pub accounts_from_file: bool,
     pub origin_rank: usize,
+    pub probability_of_rotation: f64,
 }
 
 
@@ -468,6 +469,23 @@ impl Cluster {
                     .unwrap();
 
                 self_node.active_set.prune(self_pubkey, dest, &[*origin], stakes);
+            }
+        }
+    }
+
+    pub fn chance_to_rotate<R: Rng>(
+        &self,
+        rng: &mut R,
+        nodes: &mut Vec<Node>,
+        active_set_size: usize,
+        stakes: &HashMap<Pubkey, u64>,
+        probability_of_rotation: f64,
+    ) {
+        info!("Rotating Active Sets....");
+        for node in nodes {
+            if rng.gen::<f64>() < probability_of_rotation {
+                debug!("Rotating Active Set for: {:?}", node.pubkey());
+                node.rotate_active_set(rng, active_set_size, stakes);
             }
         }
     }
