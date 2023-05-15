@@ -34,6 +34,8 @@ pub struct Config {
     pub origin_rank: usize,
 }
 
+
+
 pub struct Cluster {
     gossip_push_fanout: usize,
 
@@ -69,6 +71,8 @@ pub struct Cluster {
     // src_node => dst_nodes {A, B, C, ..., N}
     pushes: HashMap<Pubkey, HashSet<Pubkey>>,
 
+    rmr: gossip_stats::RelativeMessageRedundancy,
+
 
 }
 
@@ -86,6 +90,7 @@ impl Cluster {
             mst: HashMap::new(),
             prunes: HashMap::new(),
             pushes: HashMap::new(),
+            rmr: gossip_stats::RelativeMessageRedundancy::default(),
         }
     }
 
@@ -99,6 +104,7 @@ impl Cluster {
         self.mst.clear();
         self.prunes.clear();
         self.pushes.clear();
+        self.rmr.reset();
     }
 
     pub fn get_outbound_degree(
@@ -272,6 +278,24 @@ impl Cluster {
         }
     }
 
+    // calculate rmr if not already calculated and return it
+    // if calculated return it. 
+    pub fn relative_message_redundancy(
+        &mut self,
+    ) -> Result<f64, String> {
+        if self.rmr.rmr() == 0.0 {
+            self.rmr.calculate_rmr()
+        } else {
+            Ok(self.rmr.rmr())
+        }
+    }
+
+    pub fn get_rmr_struct(
+        &self,
+    ) -> &gossip_stats::RelativeMessageRedundancy {
+        &self.rmr
+    }
+
     pub fn write_adjacency_list_to_file(
         &self,
         filename: &str,
@@ -320,6 +344,7 @@ impl Cluster {
         self.distances.insert(*origin_pubkey, 0); //initialize beginning node
         self.queue.push_back(*origin_pubkey);
         self.visited.insert(*origin_pubkey);
+        self.rmr.increment_n(); // add origin to rmr node count
 
         // going through BFS
         while !self.queue.is_empty() {
@@ -364,6 +389,9 @@ impl Cluster {
                         Err(_) => (), // neighbor hasn't pruned anyone
                     };
 
+                    // add new push message to rmr message count.
+                    self.rmr.increment_m();
+
                     //check if we have visited this node before.
                     if !self.visited.contains(neighbor) {
                         // if not, we insert it
@@ -383,6 +411,9 @@ impl Cluster {
                                 .entry(current_node_pubkey)
                                 .or_insert_with(|| HashSet::<Pubkey>::new())
                                 .insert(*neighbor);
+
+                        // increment the new node (neighbor) to the rmr node count
+                        self.rmr.increment_n();
                     } else {
                         // we have seen this neighbor before. let's prune the current node from the 
                         // neighbor node's active set.
@@ -391,6 +422,11 @@ impl Cluster {
                                 .entry(*neighbor)
                                 .or_insert_with(|| HashSet::<Pubkey>::new())
                                 .insert(current_node_pubkey);
+
+                        // so above, we increment_m because that is indicating we are sending a new message to a neighbor
+                        // but once we send it and it results in a prune, we have to count the responding prune message
+                        // so this additional increment_m() is for the return "prune" value
+                        self.rmr.increment_m();
                     }
                     // Here we track, for specific neighbor, we know that the current node
                     // has sent a message to the neighbor. So we must note that
@@ -820,6 +856,10 @@ mod tests {
         assert_eq!(cluster.prune_exists(&nodes[0].pubkey(), &nodes[4].pubkey()), Ok(false)); // MST: M prune j, no j->M in mst
         assert_eq!(cluster.prune_exists(&nodes[1].pubkey(), &nodes[0].pubkey()), Err(())); // MST: h prune M, Err. no M->h in mst. h doesn't prune anyone
         assert_eq!(cluster.prune_exists(&nodes[5].pubkey(), &nodes[3].pubkey()), Err(()));   // MST: 5 prune P, Err. P->5 doesn't exist
+
+        // m: 19, n: 6
+        // 19 / (6 - 1) - 1 = 2.8
+        assert_eq!(cluster.relative_message_redundancy(), Ok(2.8));
 
     }
 

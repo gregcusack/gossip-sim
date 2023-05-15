@@ -247,30 +247,31 @@ fn main() {
             cluster.print_pushes();
         }
 
+        match cluster.relative_message_redundancy() {
+            Ok(result) => {
+                info!("Network RMR: {:.6}", result);
+                stats.insert_rmr(result);
+            },
+            Err(_) => error!("Network RMR error. # of nodes is 1."),
+        }
+
         // let _out = cluster.write_adjacency_list_to_file("../graph-viz/adjacency_list_pre.txt");
         cluster.prune_connections(origin_pubkey, &node_map, &stakes);
         info!("################################################################");
     }
 
-    stats.calculate_coverage_stats();
-    stats.print_coverage_stats();
-    stats.print_hops_stats();
+    stats.print_all();
+
 }
 
 #[cfg(test)]
 mod tests {
     use {
-        // super::*,
-        rand::SeedableRng, rand_chacha::ChaChaRng, std::iter::repeat_with,
-        rand::Rng,
         solana_sdk::{pubkey::Pubkey},
         std::{
             collections::{BinaryHeap},
-            time::Instant,
             cmp::Reverse,
         },
-        solana_sdk::native_token::LAMPORTS_PER_SOL,
-        log::info,
     };
 
     pub struct Node {
