@@ -13,3 +13,4 @@
 .DS_Store
 src/configs/
 src/configs/mainnet_stakes.yaml
+.vscode/
