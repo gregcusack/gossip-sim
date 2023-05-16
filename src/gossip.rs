@@ -5,7 +5,7 @@ use {
     crossbeam_channel::{Receiver, Sender},
     itertools::Itertools,
     rand::Rng,
-    log::{debug, warn, info},
+    log::{debug, warn, info, error},
     solana_client::{
         rpc_client::RpcClient, rpc_config::RpcGetVoteAccountsConfig,
         rpc_response::RpcVoteAccountStatus,
@@ -18,6 +18,7 @@ use {
         str::FromStr,
         fs::File,
         io::{BufWriter, Write},
+        iter::repeat,
     },
 
 };
@@ -33,6 +34,8 @@ pub struct Config {
     pub accounts_from_file: bool,
     pub origin_rank: usize,
     pub probability_of_rotation: f64,
+    pub prune_stake_threshold: f64,
+    pub min_ingress_nodes: usize,
 }
 
 
@@ -74,6 +77,9 @@ pub struct Cluster {
 
     rmr: gossip_stats::RelativeMessageRedundancy,
 
+    // prunes_v2: self_pubkey => peer => vec<origin>
+    // aka who (peer) sent us (self_pubkey) the extra message. and who (origin) created that extra messages
+    prunes_v2: HashMap<Pubkey, HashMap<Pubkey, Vec<Pubkey>>>
 
 }
 
@@ -90,6 +96,7 @@ impl Cluster {
             orders: HashMap::new(),
             mst: HashMap::new(),
             prunes: HashMap::new(),
+            prunes_v2: HashMap::new(),
             pushes: HashMap::new(),
             rmr: gossip_stats::RelativeMessageRedundancy::default(),
         }
@@ -104,6 +111,7 @@ impl Cluster {
         self.orders.clear();
         self.mst.clear();
         self.prunes.clear();
+        self.prunes_v2.clear();
         self.pushes.clear();
         self.rmr.reset();
     }
@@ -443,8 +451,8 @@ impl Cluster {
                     pase_counter = fanout_count;
             }
             if pase_counter + 1 != self.gossip_push_fanout {
-                warn!("for src_node {:?}", current_node_pubkey);
-                warn!("WARNING: Only pushed to {} nodes instead of the expected {} nodes!", pase_counter + 1, self.gossip_push_fanout);
+                debug!("for src_node {:?}", current_node_pubkey);
+                debug!("WARNING: Only pushed to {} nodes instead of the expected {} nodes!", pase_counter + 1, self.gossip_push_fanout);
             }
         }
     }
@@ -473,6 +481,106 @@ impl Cluster {
         }
     }
 
+    // loop through orders map and add incoming messages to our receive cache
+    pub fn consume_messages (
+        &mut self,
+        origin: &Pubkey,
+        nodes: &mut Vec<Node>,
+
+    ) {
+        // orders could just be a hashmap<pubkey, vec<(pubkey, u64)>>
+        // node here is the destination
+        for node in nodes {
+            if node.pubkey() == *origin {
+                continue;
+            }
+            // sources are sending to node.
+            let sources = match self.orders.get(&node.pubkey()) {
+                Some(sources) => sources,
+                None => {
+                    debug!("Node did not receive message, stranded: {}", node.pubkey());
+                    continue;
+                },
+            };
+            let mut sorted_hops: Vec<(&Pubkey, &u64)> = sources.iter().collect();
+            sorted_hops.sort_by_key(|&(_, hops)| hops);
+            //call record in the order of fewest to most hops. 
+            //each time we run record, we increment num_dups.
+            for (count, (src, _)) in sorted_hops.iter().enumerate() {
+                node.received_cache.record(*origin, **src, count)
+            }
+        }
+    }
+
+    // once we add messages to our receive cache, determine which nodes we need to prune
+    // based off of order Rx, min stake thresh, min numb ingress nodes.
+    pub fn send_prunes(
+        &mut self,
+        // origins: impl IntoIterator<Item = Pubkey>,
+        origin: Pubkey,
+        nodes: &mut Vec<Node>,
+        // node: &mut Node,
+        prune_stake_threshold: f64,
+        min_ingress_nodes: usize,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        for node in nodes {
+            // generate prunes for the current node.
+            let prunes =
+                node.received_cache.prune(
+                    &node.pubkey(),
+                    origin,
+                    prune_stake_threshold,
+                    min_ingress_nodes,
+                    stakes,
+                )
+                .zip(repeat(origin))
+                .into_group_map();
+
+            //for the current node, add in it's prunes
+            // prunes (above) are peer => Vec<origins>
+            // so for current node, all of the peers sent messages to the node
+            // that were duplicates. And they did that for messages originating
+            // at "origin"
+            self.prunes_v2
+                .insert(node.pubkey(), prunes);
+        }
+
+    }
+
+    // pruner has sent prunes to a bunch of nodes. we are going to handle
+    // those prunes from the side of the nodes (aka the prunees)
+    pub fn prune_connections_v2(
+        &mut self,
+        // origin: &Pubkey,
+        node_map: &HashMap<Pubkey, &Node>,
+        // nodes: &mut Vec<Node>,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        // pruner: sending the prunes.
+        // prunes: peers and origins. 
+        for (pruner, prunes) in &self.prunes_v2 {
+            // loop through prunes to get the peers that have received prune messages
+            // from the pruner.
+            debug!("len prunes: {}", prunes.len());
+            for (current_pubkey, origins) in prunes {
+                // now we switch into the context of the prunee. 
+                // prunee now has to process the prune messages. so we do that here
+                // prunee is going to update it's active_set and remove the pruner 
+                // for the specific origin.
+                if let Some(current_node) = node_map.get(current_pubkey) {
+                    info!("For node {:?}, processing prune msg from {:?}", current_pubkey, pruner);
+                    current_node.active_set.prune(current_pubkey, pruner, &origins[..], stakes);
+                } else {
+                    error!("ERROR. We should never reach here. all nodes in prunes_v2 should be in node_map");
+                }
+            }
+        }
+
+    }
+
+    
+
     pub fn chance_to_rotate<R: Rng>(
         &self,
         rng: &mut R,
@@ -489,6 +597,8 @@ impl Cluster {
             }
         }
     }
+
+
 }
 
 

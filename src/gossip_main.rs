@@ -23,10 +23,6 @@ use {
         path::Path, 
         collections::{HashMap, BinaryHeap},
         process::exit,
-        hash::{
-            BuildHasher,
-            Hash,
-        },
         cmp::Reverse,
     },
 
@@ -153,6 +149,8 @@ fn main() {
         accounts_from_file: matches.is_present("accounts_from_yaml"),
         origin_rank: value_t_or_exit!(matches, "origin_rank", usize),
         probability_of_rotation: value_t_or_exit!(matches, "active_set_rotation_probability", f64),
+        prune_stake_threshold: 0.15, //default. TODO: set cmd line args
+        min_ingress_nodes: 2, //default. TODO: set cmd line args
     };
 
     // check if we want to write keys and stakes to a file
@@ -229,52 +227,55 @@ fn main() {
                 .map(|node| (node.pubkey(), node))
                 .collect();
             cluster.new_mst(origin_pubkey, &stakes, &node_map);
+        }
         
-            info!("Calculation Complete. Printing results...");
-            cluster.print_hops();
-            // cluster.print_node_orders();
+        // info!("Calculation Complete. Printing results...");
+        // cluster.print_hops();
+        // cluster.print_node_orders();
 
-            info!("Origin Node: {:?}", origin_pubkey);
-            cluster.print_mst();
-            // cluster.print_prunes();
+        // info!("Origin Node: {:?}", origin_pubkey);
+        // cluster.print_mst();
+        // cluster.print_prunes();
 
-            let (coverage, stranded_nodes) = cluster.coverage(&stakes);
-            info!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
-            info!("{} nodes are stranded", stranded_nodes);
-            if stranded_nodes > 0 {
-                cluster.stranded_nodes(&stakes);
-            }
-            if coverage < poor_coverage_threshold {
-                warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
-                number_of_poor_coverage_runs += 1;
-            }
+        let (coverage, stranded_nodes) = cluster.coverage(&stakes);
+        info!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
+        info!("{} nodes are stranded", stranded_nodes);
+        // if stranded_nodes > 0 {
+        //     cluster.stranded_nodes(&stakes);
+        // }
+        if coverage < poor_coverage_threshold {
+            warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
+            number_of_poor_coverage_runs += 1;
+        }
+    
+        stats.insert_coverage(coverage);
+        stats.insert_hops_stat(
+            HopsStat::new(
+                cluster.get_distances()
+            )
+        );
+
+        if log::log_enabled!(Level::Debug) {
+            cluster.print_pushes();
+        }
+
+        match cluster.relative_message_redundancy() {
+            Ok(result) => {
+                info!("Network RMR: {:.6}", result);
+                stats.insert_rmr(result);
+            },
+            Err(_) => error!("Network RMR error. # of nodes is 1."),
+        }
+
+        cluster.consume_messages(origin_pubkey, &mut nodes);
+        cluster.send_prunes(*origin_pubkey, &mut nodes, config.prune_stake_threshold, config.min_ingress_nodes, &stakes);
         
-            stats.insert_coverage(coverage);
-            stats.insert_hops_stat(
-                HopsStat::new(
-                    cluster.get_distances()
-                )
-            );
-
-            if log::log_enabled!(Level::Debug) {
-                cluster.print_pushes();
-            }
-
-            match cluster.relative_message_redundancy() {
-                Ok(result) => {
-                    info!("Network RMR: {:.6}", result);
-                    stats.insert_rmr(result);
-                },
-                Err(_) => error!("Network RMR error. # of nodes is 1."),
-            }
-
-        // // let _out = cluster.write_adjacency_list_to_file("../graph-viz/adjacency_list_pre.txt");
-        
-        //     let node_map: HashMap<Pubkey, &Node> = nodes
-        //         .iter()
-        //         .map(|node| (node.pubkey(), node))
-        //         .collect();
-            cluster.prune_connections(origin_pubkey, &node_map, &stakes);
+        {
+            let node_map: HashMap<Pubkey, &Node> = nodes
+                .iter()
+                .map(|node| (node.pubkey(), node))
+                .collect();
+            cluster.prune_connections_v2(&node_map, &stakes);
         }
 
         let mut rng = rand::thread_rng();
