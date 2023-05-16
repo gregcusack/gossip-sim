@@ -275,7 +275,7 @@ fn main() {
                 .iter()
                 .map(|node| (node.pubkey(), node))
                 .collect();
-            cluster.prune_connections_v2(&node_map, &stakes);
+            cluster.prune_connections(&node_map, &stakes);
         }
 
         let mut rng = rand::thread_rng();
@@ -442,17 +442,22 @@ mod tests {
                 cluster.new_mst(origin_pubkey, &stakes, &node_map);
             }
 
-            cluster.print_mst();
+            // cluster.print_mst();
 
             cluster.consume_messages(origin_pubkey, &mut nodes);
             cluster.send_prunes(*origin_pubkey, &mut nodes, PRUNE_STAKE_THRESHOLD, MIN_INGRESS_NODES, &stakes);
             let prunes = cluster.get_prunes_v2();
             assert_eq!(prunes.len(), 6);
+            for n in nodes.iter() {
+                println!("{:?}", n.pubkey());
+            }
             for (pruner, prune) in prunes.iter() {
                 if i <= 18 {
                     assert_eq!(prune.len(), 0);
                 }
+                println!("pruner: {:?}", pruner);
                 for (prunee, _) in prune.iter() {
+                    println!("prunee: {:?}", prunee);
                     if pruner == &nodes[2].pubkey() {               // 3 prunes M
                         assert_eq!(prunee, &nodes[0].pubkey());
                     } else if pruner == &nodes[0].pubkey() {        // M prunes H
@@ -467,13 +472,14 @@ mod tests {
                     .iter()
                     .map(|node| (node.pubkey(), node))
                     .collect();
-                cluster.prune_connections_v2(&node_map, &stakes);
+                cluster.prune_connections(&node_map, &stakes);
             }
 
             let mut rng = rand::thread_rng();
             let seed = [42u8; 32];
             let mut rotate_seed_rng = StdRng::from_seed(seed);
-            cluster.chance_to_rotate(&mut rng, &mut nodes, ACTIVE_SET_SIZE, &stakes, CHANCE_TO_ROTATE, &mut rotate_seed_rng);
+            let mut rotate_seed_rng_2 = StdRng::from_seed(seed);
+            cluster.chance_to_rotate(&mut rotate_seed_rng_2, &mut nodes, ACTIVE_SET_SIZE, &stakes, CHANCE_TO_ROTATE, &mut rotate_seed_rng);
         }
     }
 }
