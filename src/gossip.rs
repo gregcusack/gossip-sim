@@ -20,7 +20,7 @@ use {
         io::{BufWriter, Write},
         iter::repeat,
     },
-
+    rand::rngs::StdRng,
 };
 
 #[cfg_attr(test, cfg(test))]
@@ -223,6 +223,12 @@ impl Cluster {
         &self,
     ) -> &HashMap<Pubkey, u64> {
         &self.distances
+    }
+
+    pub fn get_prunes_v2(
+        &self,
+    ) -> &HashMap<Pubkey, HashMap<Pubkey, Vec<Pubkey>>> {
+        &self.prunes_v2
     }
 
     pub fn print_hops(
@@ -569,7 +575,7 @@ impl Cluster {
                 // prunee is going to update it's active_set and remove the pruner 
                 // for the specific origin.
                 if let Some(current_node) = node_map.get(current_pubkey) {
-                    info!("For node {:?}, processing prune msg from {:?}", current_pubkey, pruner);
+                    debug!("For node {:?}, processing prune msg from {:?}", current_pubkey, pruner);
                     current_node.active_set.prune(current_pubkey, pruner, &origins[..], stakes);
                 } else {
                     error!("ERROR. We should never reach here. all nodes in prunes_v2 should be in node_map");
@@ -579,8 +585,6 @@ impl Cluster {
 
     }
 
-    
-
     pub fn chance_to_rotate<R: Rng>(
         &self,
         rng: &mut R,
@@ -588,12 +592,14 @@ impl Cluster {
         active_set_size: usize,
         stakes: &HashMap<Pubkey, u64>,
         probability_of_rotation: f64,
+        seeded_rng: &mut StdRng,
+
     ) {
         info!("Rotating Active Sets....");
         for node in nodes {
-            if rng.gen::<f64>() < probability_of_rotation {
+            if seeded_rng.gen::<f64>() < probability_of_rotation {
                 debug!("Rotating Active Set for: {:?}", node.pubkey());
-                node.rotate_active_set(rng, active_set_size, stakes);
+                node.rotate_active_set(rng, active_set_size, stakes, false);
             }
         }
     }
@@ -637,8 +643,9 @@ impl Node {
         rng: &mut R,
         stakes: &HashMap<Pubkey, u64>,
         active_set_size: usize,
+        test: bool
     )  {
-        self.rotate_active_set(rng, active_set_size, stakes);
+        self.rotate_active_set(rng, active_set_size, stakes, test);
     } 
 
     fn rotate_active_set<R: Rng>(
@@ -646,6 +653,7 @@ impl Node {
         rng: &mut R,
         active_set_size: usize,
         stakes: &HashMap<Pubkey, u64>,
+        test: bool
     ) {
         // Gossip nodes to be sampled for each push active set.
         // TODO: this should only be a set of entrypoints not all staked nodes.
@@ -658,7 +666,7 @@ impl Node {
             .into_iter()
             .collect();
 
-        if cfg!(test) {
+        if test {
             nodes.sort();
         }
 
@@ -835,7 +843,7 @@ mod tests {
         active_set_size: usize,
     ) {
         for node in nodes {
-            node.run_gossip(rng, stakes, active_set_size);
+            node.run_gossip(rng, stakes, active_set_size, true);
         }
     }
 
@@ -990,5 +998,8 @@ mod tests {
         assert_eq!(cluster.relative_message_redundancy(), Ok(2.8));
 
     }
+
+
+    
 
 }
