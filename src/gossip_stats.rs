@@ -166,23 +166,25 @@ impl CoverageStatsCollection {
     pub fn calculate_stats (
         &mut self,
     ) {
-        self.coverages
+        // clone to maintain iteration order for print_stats
+        let mut sorted_coverages = self.coverages.clone();
+        sorted_coverages
             .sort_by(|a, b| a
                     .partial_cmp(b)
                     .unwrap());
-        let len = self.coverages.len();
-        let mean = self.coverages
+        let len = sorted_coverages.len();
+        let mean = sorted_coverages
             .iter()
             .sum::<f64>() / len as f64;
         let median = if len % 2 == 0 {
-            (self.coverages[len / 2 - 1] + self.coverages[len / 2]) / 2.0
+            (sorted_coverages[len / 2 - 1] + sorted_coverages[len / 2]) / 2.0
         } else {
-            self.coverages[len / 2]
+            sorted_coverages[len / 2]
         };
-        let max = *self.coverages
+        let max = *sorted_coverages
             .last()
             .unwrap_or(&0.0);
-        let min = *self.coverages
+        let min = *sorted_coverages
             .first()
             .unwrap_or(&0.0);
 
@@ -298,24 +300,25 @@ impl RelativeMessageRedundancyCollection {
     pub fn calculate_stats (
         &mut self,
     ) {
-        self.rmrs
+        // clone to maintain iteration order for print_stats
+        let mut sorted_rms = self.rmrs.clone();
+        sorted_rms
             .sort_by(|a, b| a
                     .partial_cmp(b)
                     .unwrap());
-        let len = self.rmrs.len();
-        let mean = self.rmrs
+        let len = sorted_rms.len();
+        let mean = sorted_rms
             .iter()
             .sum::<f64>() / len as f64;
         let median = if len % 2 == 0 {
-            info!("len: {}", len);
-            (self.rmrs[len / 2 - 1] + self.rmrs[len / 2]) / 2.0
+            (sorted_rms[len / 2 - 1] + sorted_rms[len / 2]) / 2.0
         } else {
-            self.rmrs[len / 2]
+            sorted_rms[len / 2]
         };
-        let max = *self.rmrs
+        let max = *sorted_rms
             .last()
             .unwrap_or(&0.0);
-        let min = *self.rmrs
+        let min = *sorted_rms
             .first()
             .unwrap_or(&0.0);
 
@@ -331,7 +334,6 @@ impl RelativeMessageRedundancyCollection {
         info!("Number of iterations: {}", self.rmrs.len());
         info!("RMRs: {}", self.rmrs
             .iter()
-            .rev()
             .map(|n| format!("{:.6}", n))
             .collect::<Vec<String>>()
             .join(", ")

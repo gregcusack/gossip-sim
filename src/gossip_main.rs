@@ -23,14 +23,10 @@ use {
         path::Path, 
         collections::{HashMap, BinaryHeap},
         process::exit,
-        hash::{
-            BuildHasher,
-            Hash,
-        },
         cmp::Reverse,
     },
-
-    rand::SeedableRng, rand_chacha::ChaChaRng,
+    rand::rngs::StdRng,
+    rand::SeedableRng,
 };
 
 fn parse_matches() -> ArgMatches {
@@ -94,6 +90,18 @@ fn parse_matches() -> ArgMatches {
                             1000 -> 1000th largest stake
                     Default is largest stake as origin"),
         )
+        .arg(
+            Arg::with_name("active_set_rotation_probability")
+                .long("rotation-probability")
+                .short('p')
+                .takes_value(true)
+                .default_value(".01")
+                .validator(|s| match s.parse::<f64>() {
+                    Ok(n) if n >= 0.0 && n <= 1.0 => Ok(()),
+                    _ => Err(String::from("active_set_rotation_probability must be between 0 and 1")),
+                })
+                .help("After each round of gossip, rotate a node's active set with a set probability 0 <= p <= 1"),
+        )
         .get_matches()
 }
 
@@ -107,7 +115,7 @@ pub fn run_gossip(
     let mut rng = rand::thread_rng();
     // let mut rng = ChaChaRng::from_seed([189u8; 32]);
     for node in nodes {
-        node.run_gossip(&mut rng, stakes, active_set_size);
+        node.run_gossip(&mut rng, stakes, active_set_size, false);
     }
     
     Ok(())
@@ -140,6 +148,9 @@ fn main() {
         gossip_iterations: value_t_or_exit!(matches, "gossip_iterations", usize),
         accounts_from_file: matches.is_present("accounts_from_yaml"),
         origin_rank: value_t_or_exit!(matches, "origin_rank", usize),
+        probability_of_rotation: value_t_or_exit!(matches, "active_set_rotation_probability", f64),
+        prune_stake_threshold: 0.15, //default. TODO: set cmd line args
+        min_ingress_nodes: 2, //default. TODO: set cmd line args
     };
 
     // check if we want to write keys and stakes to a file
@@ -198,12 +209,6 @@ fn main() {
     let _res = run_gossip(&mut nodes, &stakes, config.gossip_active_set_size).unwrap();
     info!("Simulation Complete!");
 
-
-    let node_map: HashMap<Pubkey, &Node> = nodes
-        .iter()
-        .map(|node| (node.pubkey(), node))
-        .collect();
-
     let mut cluster: Cluster = Cluster::new(config.gossip_push_fanout);
 
     let origin_node = find_nth_largest_node(config.origin_rank, &nodes).unwrap();
@@ -216,26 +221,33 @@ fn main() {
     for i in 0..config.gossip_iterations {
         info!("MST ITERATION: {}", i);
         info!("Calculating the MST for origin: {:?}", origin_pubkey);
-        cluster.new_mst(origin_pubkey, &stakes, &node_map);
-        info!("Calculation Complete. Printing results...");
-        cluster.print_hops();
+        {
+            let node_map: HashMap<Pubkey, &Node> = nodes
+                .iter()
+                .map(|node| (node.pubkey(), node))
+                .collect();
+            cluster.new_mst(origin_pubkey, &stakes, &node_map);
+        }
+        
+        // info!("Calculation Complete. Printing results...");
+        // cluster.print_hops();
         // cluster.print_node_orders();
 
-        info!("Origin Node: {:?}", origin_pubkey);
-        cluster.print_mst();
+        // info!("Origin Node: {:?}", origin_pubkey);
+        // cluster.print_mst();
         // cluster.print_prunes();
 
         let (coverage, stranded_nodes) = cluster.coverage(&stakes);
         info!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
         info!("{} nodes are stranded", stranded_nodes);
-        if stranded_nodes > 0 {
-            cluster.stranded_nodes(&stakes);
-        }
+        // if stranded_nodes > 0 {
+        //     cluster.stranded_nodes(&stakes);
+        // }
         if coverage < poor_coverage_threshold {
             warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
             number_of_poor_coverage_runs += 1;
         }
-      
+    
         stats.insert_coverage(coverage);
         stats.insert_hops_stat(
             HopsStat::new(
@@ -255,9 +267,19 @@ fn main() {
             Err(_) => error!("Network RMR error. # of nodes is 1."),
         }
 
-        // let _out = cluster.write_adjacency_list_to_file("../graph-viz/adjacency_list_pre.txt");
-        cluster.prune_connections(origin_pubkey, &node_map, &stakes);
-        info!("################################################################");
+        cluster.consume_messages(origin_pubkey, &mut nodes);
+        cluster.send_prunes(*origin_pubkey, &mut nodes, config.prune_stake_threshold, config.min_ingress_nodes, &stakes);
+        
+        {
+            let node_map: HashMap<Pubkey, &Node> = nodes
+                .iter()
+                .map(|node| (node.pubkey(), node))
+                .collect();
+            cluster.prune_connections_v2(&node_map, &stakes);
+        }
+
+        let mut rng = rand::thread_rng();
+        cluster.chance_to_rotate(&mut rng, &mut nodes, config.gossip_active_set_size, &stakes, config.probability_of_rotation, &mut StdRng::from_entropy());
     }
 
     stats.print_all();
@@ -269,22 +291,53 @@ mod tests {
     use {
         solana_sdk::{pubkey::Pubkey},
         std::{
-            collections::{BinaryHeap},
+            collections::{BinaryHeap, HashMap},
             cmp::Reverse,
+            iter::repeat_with,
         },
+        gossip_sim::gossip::{
+            Node,
+            Cluster,
+            make_gossip_cluster_for_tests,
+        },
+        solana_sdk::native_token::LAMPORTS_PER_SOL,
+        rand::SeedableRng,
+        rand_chacha::ChaChaRng,
+        rand::Rng,
+        rand::rngs::StdRng,
     };
 
-    pub struct Node {
+    pub struct TestNode {
         pub pubkey: Pubkey,
         pub stake: u64,
     }
 
-    fn create_nodes(stakes: Vec<u64>) -> Vec<Node> {
+    pub fn run_gossip(
+        rng: &mut ChaChaRng,
+        nodes: &mut Vec<Node>,
+        stakes: &HashMap<Pubkey, /*stake:*/ u64>,
+        active_set_size: usize,
+    ) {
+        for node in nodes {
+            node.run_gossip(rng, stakes, active_set_size, true);
+        }
+    }
+
+    pub fn get_bucket(stake: &u64) -> u64 {
+        let stake = stake / LAMPORTS_PER_SOL;
+        // say stake is high. few leading zeros. so bucket is high.
+        let bucket = u64::BITS - stake.leading_zeros();
+        // get min of 24 and bucket. higher numbered buckets are higher stake. low buckets low stake
+        let bucket = (bucket as usize).min(25 - 1);
+        bucket as u64
+    }
+
+    fn create_nodes(stakes: Vec<u64>) -> Vec<TestNode> {
         let mut nodes = Vec::new();
     
         for stake in stakes {
             let pubkey = Pubkey::new_unique();
-            let node = Node {
+            let node = TestNode {
                 pubkey,
                 stake,
             };
@@ -294,7 +347,7 @@ mod tests {
         nodes
     }
     
-    fn find_nth_largest_node(n: usize, nodes: &[Node]) -> Option<&Node> {
+    fn find_nth_largest_node(n: usize, nodes: &[TestNode]) -> Option<&TestNode> {
         let mut heap = BinaryHeap::new();
         for node in nodes {
             if heap.len() < n {
@@ -319,6 +372,108 @@ mod tests {
             let origin_node = find_nth_largest_node(*r, &nodes[..]).unwrap();
             let stake = origin_node.stake;
             assert_eq!(stake, res[index]);
+        }
+    }
+
+    #[test]
+    fn test_pruning() {
+        const PUSH_FANOUT: usize = 2;
+        const ACTIVE_SET_SIZE: usize = 12;
+        const PRUNE_STAKE_THRESHOLD: f64 = 0.15;
+        const MIN_INGRESS_NODES: usize = 2;
+        const CHANCE_TO_ROTATE: f64 = 0.2;
+        const GOSSIP_ITERATIONS: usize = 21;
+
+        let nodes: Vec<_> = repeat_with(Pubkey::new_unique).take(5).collect();
+        const MAX_STAKE: u64 = (1 << 20) * LAMPORTS_PER_SOL;
+        let mut rng = ChaChaRng::from_seed([189u8; 32]);
+        let pubkey = Pubkey::new_unique();
+        let stakes = repeat_with(|| rng.gen_range(1, MAX_STAKE));
+        let mut stakes: HashMap<_, _> = nodes.iter().copied().zip(stakes).collect();
+        stakes.insert(pubkey, rng.gen_range(1, MAX_STAKE));
+
+        let res = make_gossip_cluster_for_tests(&stakes)
+            .unwrap();
+
+        let (mut nodes, _): (Vec<_>, Vec<_>) = res
+            .into_iter()
+            .map(|(node, sender)| {
+                let pubkey = node.pubkey();
+                (node, (pubkey, sender))
+            })
+            .unzip();
+
+        // sort to maintain order across tests
+        nodes.sort_by_key(|node| node.pubkey() );
+
+        // setup gossip
+        run_gossip(&mut rng, &mut nodes, &stakes, ACTIVE_SET_SIZE);
+    
+        let node_map: HashMap<Pubkey, &Node> = nodes
+            .iter()
+            .map(|node| (node.pubkey(), node))
+            .collect();
+
+        let mut cluster: Cluster = Cluster::new(PUSH_FANOUT);
+        let origin_pubkey = &pubkey; //just a temp origin selection
+        cluster.new_mst(origin_pubkey, &stakes, &node_map);
+
+        // verify buckets
+        let mut keys = stakes.keys().cloned().collect::<Vec<_>>();
+        keys.sort_by_key(|&k| stakes.get(&k));
+
+        let buckets: Vec<u64> = vec![15, 16, 19, 19, 20, 20];
+        for (key, &bucket) in keys.iter().zip(buckets.iter()) {
+            let current_stake = stakes.get(&key).unwrap();
+            let bucket_from_stake = get_bucket(current_stake);
+            assert_eq!(bucket, bucket_from_stake);
+        }
+
+        // in this test all nodes should be visited
+        assert_eq!(cluster.get_visited_len(), 6);
+
+        for i in 0..GOSSIP_ITERATIONS {
+            println!("i: {}", i);
+            {
+                let node_map: HashMap<Pubkey, &Node> = nodes
+                    .iter()
+                    .map(|node| (node.pubkey(), node))
+                    .collect();
+                cluster.new_mst(origin_pubkey, &stakes, &node_map);
+            }
+
+            cluster.print_mst();
+
+            cluster.consume_messages(origin_pubkey, &mut nodes);
+            cluster.send_prunes(*origin_pubkey, &mut nodes, PRUNE_STAKE_THRESHOLD, MIN_INGRESS_NODES, &stakes);
+            let prunes = cluster.get_prunes_v2();
+            assert_eq!(prunes.len(), 6);
+            for (pruner, prune) in prunes.iter() {
+                if i <= 18 {
+                    assert_eq!(prune.len(), 0);
+                }
+                for (prunee, _) in prune.iter() {
+                    if pruner == &nodes[2].pubkey() {               // 3 prunes M
+                        assert_eq!(prunee, &nodes[0].pubkey());
+                    } else if pruner == &nodes[0].pubkey() {        // M prunes H
+                        assert_eq!(prunee, &nodes[1].pubkey()); 
+                    } else if pruner == &nodes[4].pubkey() {        // J prunes P
+                        assert_eq!(prunee, &nodes[3].pubkey());
+                    }
+                }
+            }
+            {
+                let node_map: HashMap<Pubkey, &Node> = nodes
+                    .iter()
+                    .map(|node| (node.pubkey(), node))
+                    .collect();
+                cluster.prune_connections_v2(&node_map, &stakes);
+            }
+
+            let mut rng = rand::thread_rng();
+            let seed = [42u8; 32];
+            let mut rotate_seed_rng = StdRng::from_seed(seed);
+            cluster.chance_to_rotate(&mut rng, &mut nodes, ACTIVE_SET_SIZE, &stakes, CHANCE_TO_ROTATE, &mut rotate_seed_rng);
         }
     }
 }
