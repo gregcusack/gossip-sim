@@ -80,7 +80,6 @@ pub struct Cluster {
     // prunes_v2: self_pubkey => peer => vec<origin>
     // aka who (peer) sent us (self_pubkey) the extra message. and who (origin) created that extra messages
     prunes_v2: HashMap<Pubkey, HashMap<Pubkey, Vec<Pubkey>>>
-
 }
 
 impl Cluster {

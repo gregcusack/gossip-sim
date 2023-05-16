@@ -280,8 +280,6 @@ fn main() {
 
         let mut rng = rand::thread_rng();
         cluster.chance_to_rotate(&mut rng, &mut nodes, config.gossip_active_set_size, &stakes, config.probability_of_rotation, &mut StdRng::from_entropy());
-
-        info!("################################################################");
     }
 
     stats.print_all();
@@ -307,9 +305,6 @@ mod tests {
         rand_chacha::ChaChaRng,
         rand::Rng,
         rand::rngs::StdRng,
-
-
-
     };
 
     pub struct TestNode {
