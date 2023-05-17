@@ -198,12 +198,15 @@ impl CoverageStatsCollection {
         &self,
     ) {
         info!("Number of iterations: {}", self.coverages.len());
-        info!("Coverages: {}", self.coverages
+        let formatted: String = self.coverages
             .iter()
-            .map(|n| format!("{:.6}", n))
+            .map(|&f| format!("{:.6}", f))
             .collect::<Vec<String>>()
-            .join(", ")
-        );
+            .join("\n");
+
+        let output = format!("Coverages:\n{}", formatted);
+        info!("{}", output);
+
         info!("Coverage {}", self.mean);
         info!("Coverage {}", self.median);
         info!("Coverage {}", self.max);
@@ -332,12 +335,21 @@ impl RelativeMessageRedundancyCollection {
         &self,
     ) {
         info!("Number of iterations: {}", self.rmrs.len());
-        info!("RMRs: {}", self.rmrs
+        // info!("RMRs: {}", self.rmrs
+        //     .iter()
+        //     .map(|n| format!("{:.6}", n))
+        //     .collect::<Vec<String>>()
+        //     .join(", ")
+        // );
+        let formatted: String = self.rmrs
             .iter()
-            .map(|n| format!("{:.6}", n))
+            .map(|&f| format!("{:.6}", f))
             .collect::<Vec<String>>()
-            .join(", ")
-        );
+            .join("\n");
+
+        let output = format!("RMRs:\n{}", formatted);
+        info!("{}", output);
+
         info!("RMR {}", self.mean);
         info!("RMR {}", self.median);
         info!("RMR {}", self.max);
