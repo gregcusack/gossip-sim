@@ -25,16 +25,34 @@ use {
 pub(crate) const CRDS_UNIQUE_PUBKEY_CAPACITY: usize = 8192;
 
 #[derive(Clone, Copy, Debug)]
-pub struct Config {
+pub struct Config<'a> {
     pub gossip_push_fanout: usize,
     pub gossip_active_set_size: usize,
     pub gossip_iterations: usize, 
     pub accounts_from_file: bool,
+    pub account_file: &'a str,
     pub origin_rank: usize,
     pub probability_of_rotation: f64,
     pub prune_stake_threshold: f64,
     pub min_ingress_nodes: usize,
 }
+
+// impl<'a> std::fmt::Display for Config<'a> {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         writeln!(f, "Gossip Push Fanout: {}\n", self.gossip_push_fanout)?;
+//         writeln!(f, "Gossip Active Set Size: {}\n", self.gossip_active_set_size)?;
+//         writeln!(f, "Gossip Iterations: {}\n", self.gossip_iterations)?;
+//         writeln!(f, "Accounts From File: {}\n", self.accounts_from_file)?;
+//         writeln!(f, "Account File: {}\n", self.account_file)?;
+//         writeln!(f, "Origin Rank: {}\n", self.origin_rank)?;
+//         writeln!(f, "Probability of Rotation: {}\n", self.probability_of_rotation)?;
+//         writeln!(f, "Prune Stake Threshold: {}\n", self.prune_stake_threshold)?;
+//         writeln!(f, "Minimum Ingress Nodes: {}\n", self.min_ingress_nodes)?;
+
+//         Ok(())
+//     }
+// }
+
 
 pub struct Cluster {
     gossip_push_fanout: usize,
