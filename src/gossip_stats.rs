@@ -107,7 +107,7 @@ impl HopsStat {
         info!("Hops {}", self.mean);
         info!("Hops {}", self.median);
         info!("Hops {}", self.max);
-        info!("Hops {}", self.min);
+        // info!("Hops {}", self.min); // min hops is always 0
     }
     
 }

@@ -58,12 +58,12 @@ cargo run --bin write-accounts -- --num-nodes <num-nodes> --account-file <path-t
 - Read accounts from the file you created in (Option 1) and simulate the network
     - Note it will simulate all of the accounts in the file. 
 ```
-cargo run --bin gossip-sim -- --account-file <path-to-yaml-file> --accounts-from-yaml --push-fanout <push_fanout> --active-set-size <active_set_size> --iterations <number_of_gossip_iterations> --origin-rank <origin_stake_rank>
+cargo run --bin gossip-sim -- --account-file <path-to-yaml-file> --accounts-from-yaml --push-fanout <push_fanout> --active-set-size <active_set_size> --iterations <number_of_gossip_iterations> --origin-rank <origin_stake_rank> -p <probability-of-active-set-rotation> --min-ingress-nodes <min-ingress-nodes> --stake-threshold <min-stake-threshol>
 ```
 #### Option 3: Pull accounts from mainnet and run simulation
 - This will pull all node accounts from mainnet and simulate the network.
 ```
-cargo run --bin gossip-sim -- --account-file `<path-to-yaml-file>` --accounts-from-yaml --push-fanout <push_fanout> --active-set-size <active_set_size> --iterations <number_of_gossip_iterations> --origin-rank <origin_stake_rank>
+cargo run --bin gossip-sim -- --account-file `<path-to-yaml-file>` --accounts-from-yaml --push-fanout <push_fanout> --active-set-size <active_set_size> --iterations <number_of_gossip_iterations> --origin-rank <origin_stake_rank> -p <probability-of-active-set-rotation> --min-ingress-nodes <min-ingress-nodes> --stake-threshold <min-stake-threshol>
 ```
 
 ## Interpreting the output
@@ -163,11 +163,7 @@ D -> C
 
 
 ## Caveat
-- Currently just takes the first node in the account list and uses it as the origin! Can't specify origin yet.
-- Only simulates a single round of gossip. aka active_sets are rotated once at the beginning and the simulation runs for that state
-- We do not simulate pruning (WIP)
 - We do not simulate pull requests
-- MST is the true definition of an MST. BUT, in solana we want to maintain at least two incoming connections.
 
 ## Progress
 - [x] Initialize all node with respective stakes and simulated active_sets
@@ -180,9 +176,9 @@ D -> C
 - [x] Identify MST src->vec<dest>
 - [x] Identify dest->vec<src> prunes
 - [x] write tests for above
-- [ ] implement pruning logic.
-- [ ] measure coverage for different `CRDS_GOSSIP_PUSH_FANOUT` and `CRDS_GOSSIP_PUSH_ACTIVE_SET_SIZE`
-- [ ] maintain minimum stake threshold and minimum incoming connections when pruning
+- [x] implement pruning logic.
+- [x] measure coverage for different `CRDS_GOSSIP_PUSH_FANOUT` and `CRDS_GOSSIP_PUSH_ACTIVE_SET_SIZE`
+- [x] maintain minimum stake threshold and minimum incoming connections when pruning
 
 
 
