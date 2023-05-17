@@ -102,6 +102,24 @@ fn parse_matches() -> ArgMatches {
                 })
                 .help("After each round of gossip, rotate a node's active set with a set probability 0 <= p <= 1"),
         )
+        .arg(
+            Arg::with_name("min_ingress_nodes")
+                .long("min-ingress-nodes")
+                .takes_value(true)
+                .default_value("2")
+                .help("Minimum number of incoming peers a node must keep"),
+        )
+        .arg(
+            Arg::with_name("prune_stake_threshold")
+                .long("stake-threshold")
+                .takes_value(true)
+                .default_value(".15")
+                .validator(|s| match s.parse::<f64>() {
+                    Ok(n) if n >= 0.0 && n <= 1.0 => Ok(()),
+                    _ => Err(String::from("prune_stake_threshold must be between 0 and 1")),
+                })
+                .help("Ensure a node is connected to a minimum stake of prune_stake_threshold*node.stake()"),
+        )
         .get_matches()
 }
 
@@ -147,26 +165,27 @@ fn main() {
         gossip_active_set_size: value_t_or_exit!(matches, "gossip_push_active_set_entry_size", usize),
         gossip_iterations: value_t_or_exit!(matches, "gossip_iterations", usize),
         accounts_from_file: matches.is_present("accounts_from_yaml"),
+        account_file: matches.value_of("account_file").unwrap_or_default(),
         origin_rank: value_t_or_exit!(matches, "origin_rank", usize),
         probability_of_rotation: value_t_or_exit!(matches, "active_set_rotation_probability", f64),
-        prune_stake_threshold: 0.15, //default. TODO: set cmd line args
-        min_ingress_nodes: 2, //default. TODO: set cmd line args
+        prune_stake_threshold: value_t_or_exit!(matches, "prune_stake_threshold", f64), 
+        min_ingress_nodes: value_t_or_exit!(matches, "min_ingress_nodes", usize), 
     };
 
     // check if we want to write keys and stakes to a file
-    let account_file = matches.value_of("account_file").unwrap_or_default();
+    // let account_file = matches.value_of("account_file").unwrap_or_default();
 
     // check if we want to read in pubkeys/stakes from a file
     let nodes = if config.accounts_from_file {
         // READ ACCOUNTS FROM FILE
-        if account_file.is_empty() {
+        if config.account_file.is_empty() {
             error!("Failed to pass in account file to read from with --accounts-from-yaml flag. need --acount-file <path>");
             exit(-1);
         }
-        let path = Path::new(&account_file);
+        let path = Path::new(&config.account_file);
         let file = File::open(path).unwrap();
 
-        info!("Reading {}", account_file);
+        info!("Reading {}", config.account_file);
         let accounts: HashMap<String, u64> = serde_yaml::from_reader(file).unwrap();
         info!("{} accounts read in", accounts.len());
         let nodes = make_gossip_cluster_from_map(&accounts);
@@ -181,11 +200,13 @@ fn main() {
         nodes
     }.unwrap();
 
-    info!("Using the following nodes and stakes");
+    info!("{:#?}", config);
+
+    debug!("Using the following nodes and stakes");
     let (mut nodes, _): (Vec<_>, Vec<_>) = nodes
         .into_iter()
         .map(|(node, sender)| {
-            info!("pubkey, stake: {:?}, {}", node.pubkey(), node.stake());
+            debug!("pubkey, stake: {:?}, {}", node.pubkey(), node.stake());
             let pubkey = node.pubkey();
             (node, (pubkey, sender))
         })
