@@ -1,6 +1,6 @@
 use {
     clap::{crate_description, crate_name, App, Arg, ArgMatches, value_t_or_exit},
-    log::{error, info, warn, Level},
+    log::{error, info, debug, warn, Level},
     gossip_sim::{
         API_MAINNET_BETA,
         Error,
@@ -215,7 +215,7 @@ fn main() {
     let origin_pubkey = &origin_node.pubkey();
 
     info!("ORIGIN: {:?}", origin_pubkey);
-    let mut number_of_poor_coverage_runs: usize = 0;
+    let mut _number_of_poor_coverage_runs: usize = 0;
     let poor_coverage_threshold: f64 = 0.95;
     let mut stats = GossipStats::default();
     for i in 0..config.gossip_iterations {
@@ -238,14 +238,14 @@ fn main() {
         // cluster.print_prunes();
 
         let (coverage, stranded_nodes) = cluster.coverage(&stakes);
-        info!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
-        info!("{} nodes are stranded", stranded_nodes);
+        debug!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
+        debug!("{} nodes are stranded", stranded_nodes);
         // if stranded_nodes > 0 {
         //     cluster.stranded_nodes(&stakes);
         // }
         if coverage < poor_coverage_threshold {
             warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
-            number_of_poor_coverage_runs += 1;
+            _number_of_poor_coverage_runs += 1;
         }
     
         stats.insert_coverage(coverage);
@@ -408,15 +408,9 @@ mod tests {
 
         // setup gossip
         run_gossip(&mut rng, &mut nodes, &stakes, ACTIVE_SET_SIZE);
-    
-        let node_map: HashMap<Pubkey, &Node> = nodes
-            .iter()
-            .map(|node| (node.pubkey(), node))
-            .collect();
 
         let mut cluster: Cluster = Cluster::new(PUSH_FANOUT);
         let origin_pubkey = &pubkey; //just a temp origin selection
-        cluster.new_mst(origin_pubkey, &stakes, &node_map);
 
         // verify buckets
         let mut keys = stakes.keys().cloned().collect::<Vec<_>>();
@@ -429,11 +423,7 @@ mod tests {
             assert_eq!(bucket, bucket_from_stake);
         }
 
-        // in this test all nodes should be visited
-        assert_eq!(cluster.get_visited_len(), 6);
-
         for i in 0..GOSSIP_ITERATIONS {
-            println!("i: {}", i);
             {
                 let node_map: HashMap<Pubkey, &Node> = nodes
                     .iter()
@@ -441,23 +431,23 @@ mod tests {
                     .collect();
                 cluster.new_mst(origin_pubkey, &stakes, &node_map);
             }
+            // in this test all nodes should be visited
+            assert_eq!(cluster.get_visited_len(), 6);
 
             // cluster.print_mst();
+            cluster.print_node_orders();
 
             cluster.consume_messages(origin_pubkey, &mut nodes);
             cluster.send_prunes(*origin_pubkey, &mut nodes, PRUNE_STAKE_THRESHOLD, MIN_INGRESS_NODES, &stakes);
             let prunes = cluster.get_prunes_v2();
             assert_eq!(prunes.len(), 6);
-            for n in nodes.iter() {
-                println!("{:?}", n.pubkey());
-            }
             for (pruner, prune) in prunes.iter() {
                 if i <= 18 {
                     assert_eq!(prune.len(), 0);
                 }
-                println!("pruner: {:?}", pruner);
+                // println!("pruner: {:?}", pruner);
                 for (prunee, _) in prune.iter() {
-                    println!("prunee: {:?}", prunee);
+                    // println!("prunee: {:?}", prunee);
                     if pruner == &nodes[2].pubkey() {               // 3 prunes M
                         assert_eq!(prunee, &nodes[0].pubkey());
                     } else if pruner == &nodes[0].pubkey() {        // M prunes H
@@ -475,7 +465,6 @@ mod tests {
                 cluster.prune_connections(&node_map, &stakes);
             }
 
-            let mut rng = rand::thread_rng();
             let seed = [42u8; 32];
             let mut rotate_seed_rng = StdRng::from_seed(seed);
             let mut rotate_seed_rng_2 = StdRng::from_seed(seed);

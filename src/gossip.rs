@@ -255,11 +255,11 @@ impl Cluster {
     pub fn print_mst(
         &self,
     ) {
-        println!("MST: ");
+        info!("MST: ");
         for (src, dests) in &self.mst {
-            println!("##### src: {:?} #####", src);
+            info!("##### src: {:?} #####", src);
             for dest in dests {
-                println!("dest: {:?}", dest);
+                info!("dest: {:?}", dest);
             }
         }
     }
@@ -270,7 +270,7 @@ impl Cluster {
         info!("PRUNES: ");
         for (pruner, prunes) in &self.prunes {
             info!("--------- Pruner: {:?} ---------", pruner);
-            for (prunee, origin) in prunes {
+            for (prunee, _origin) in prunes {
                 info!("Prunee: {:?}", prunee);
             }
         }
@@ -472,10 +472,17 @@ impl Cluster {
                 },
             };
             let mut sorted_hops: Vec<(&Pubkey, &u64)> = sources.iter().collect();
-            sorted_hops.sort_by_key(|&(_, hops)| hops);
+            sorted_hops.sort_by(|&(key1, hops1), &(key2, hops2)| {
+                if hops1 == hops2 {
+                    key1.to_string().cmp(&key2.to_string())
+                } else {
+                    hops1.cmp(hops2)
+                }
+            });
             //call record in the order of fewest to most hops. 
             //each time we run record, we increment num_dups.
             for (count, (src, _)) in sorted_hops.iter().enumerate() {
+                debug!("dest, src, count: {:?}, {:?}, {}", node.pubkey(), src, count);
                 node.received_cache.record(*origin, **src, count)
             }
         }
@@ -538,7 +545,7 @@ impl Cluster {
                 // prunee is going to update it's active_set and remove the pruner 
                 // for the specific origin.
                 if let Some(current_node) = node_map.get(current_pubkey) {
-                    println!("For node {:?}, processing prune msg from {:?}", current_pubkey, pruner);
+                    debug!("For node {:?}, processing prune msg from {:?}", current_pubkey, pruner);
                     current_node.active_set.prune(current_pubkey, pruner, &origins[..], stakes);
                 } else {
                     error!("ERROR. We should never reach here. all nodes in prunes_v2 should be in node_map");
@@ -560,10 +567,8 @@ impl Cluster {
     ) {
         info!("Rotating Active Sets....");
         for node in nodes {
-            let chance = seeded_rng.gen::<f64>();
-            println!("chance: {}", chance);
-            if chance < probability_of_rotation {
-                println!("Rotating Active Set for: {:?}", node.pubkey());
+            if seeded_rng.gen::<f64>() < probability_of_rotation {
+                debug!("Rotating Active Set for: {:?}", node.pubkey());
                 node.rotate_active_set(rng, active_set_size, stakes, false);
             }
         }
@@ -574,7 +579,7 @@ impl Cluster {
 
 
 pub struct Node {
-    clock: Instant,
+    _clock: Instant,
     num_gossip_rounds: usize,
     pubkey: Pubkey,
     stake: u64,
@@ -583,7 +588,7 @@ pub struct Node {
     // Values are which origins the node has pruned.
     active_set: PushActiveSet,
     received_cache: ReceivedCache,
-    receiver: Receiver<Arc<Packet>>,
+    _receiver: Receiver<Arc<Packet>>,
 }
 
 impl Node {
@@ -632,7 +637,6 @@ impl Node {
             .collect();
 
         if test {
-            println!("greg");
             nodes.sort();
         }
 
@@ -653,8 +657,8 @@ pub struct CrdsKey {
 
 #[derive(Debug, Default)]
 pub struct CrdsEntry {
-    ordinal: u64,
-    num_dups: u8,
+    _ordinal: u64,
+    _num_dups: u8,
 }
 
 #[derive(Clone)]
@@ -679,16 +683,16 @@ fn make_gossip_cluster(
     let nodes: Vec<_> = accounts.into_iter().map(|node| {
         let stake = accounts.get(node.0).copied().unwrap_or_default(); //get stake from 
             let pubkey = Pubkey::from_str(&node.0)?;
-            let (sender, receiver) = crossbeam_channel::unbounded();
+            let (sender, _receiver) = crossbeam_channel::unbounded();
             let node = Node {
-                clock: now,
+                _clock: now,
                 num_gossip_rounds: 0,
                 stake,
                 pubkey,
                 table: HashMap::default(),
                 active_set: PushActiveSet::default(),
                 received_cache: ReceivedCache::new(2 * CRDS_UNIQUE_PUBKEY_CAPACITY),
-                receiver,
+                _receiver,
             };
             Ok((node, sender))
         })
@@ -752,16 +756,16 @@ pub fn make_gossip_cluster_for_tests(
     let nodes: Vec<_> = accounts.into_iter().map(|node| {
         let stake = accounts.get(node.0).copied().unwrap_or_default(); //get stake from 
             let pubkey = node.0;
-            let (sender, receiver) = crossbeam_channel::unbounded();
+            let (sender, _receiver) = crossbeam_channel::unbounded();
             let node = Node {
-                clock: now,
+                _clock: now,
                 num_gossip_rounds: 0,
                 stake,
                 pubkey: *pubkey,
                 table: HashMap::default(),
                 active_set: PushActiveSet::default(),
                 received_cache: ReceivedCache::new(2 * CRDS_UNIQUE_PUBKEY_CAPACITY),
-                receiver,
+                _receiver,
             };
             Ok((node, sender))
         })

@@ -1,6 +1,6 @@
 use {
-    clap::{crate_description, crate_name, App, Arg, ArgMatches, value_t_or_exit},
-    log::{error, warn, info},
+    clap::{crate_description, crate_name, App, Arg, ArgMatches},
+    log::info,
     gossip_sim::{
         gossip::{make_gossip_cluster_from_rpc, Node, Packet},
         API_MAINNET_BETA},
@@ -9,11 +9,9 @@ use {
     std::{
         sync::{Arc}, 
         io::Write, 
-        fs::{self, File}, 
+        fs::File, 
         path::Path, 
-        str::FromStr,
         collections::HashMap,
-        process::exit,
     },
 };
 
