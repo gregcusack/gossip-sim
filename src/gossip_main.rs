@@ -95,7 +95,7 @@ fn parse_matches() -> ArgMatches {
                 .long("rotation-probability")
                 .short('p')
                 .takes_value(true)
-                .default_value(".01")
+                .default_value(".013333") // avg. one rotation for all nodes per 75 gossip rounds (1/75)
                 .validator(|s| match s.parse::<f64>() {
                     Ok(n) if n >= 0.0 && n <= 1.0 => Ok(()),
                     _ => Err(String::from("active_set_rotation_probability must be between 0 and 1")),
