@@ -19,7 +19,7 @@ struct ReceivedCacheEntry {
 impl ReceivedCache {
     // Minimum number of upserts before a cache entry can be pruned.
     const MIN_NUM_UPSERTS: usize = 20;
-    // const MIN_NUM_UPSERTS: usize = 0;
+    // const MIN_NUM_UPSERTS: usize = 1;
 
     pub(crate) fn new(capacity: usize) -> Self {
         Self(LruCache::new(capacity))

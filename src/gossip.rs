@@ -1,11 +1,9 @@
-use solana_sdk::blake3::Hash;
-
 use {
     crate::{push_active_set::PushActiveSet, received_cache::ReceivedCache, Error, gossip_stats},
     crossbeam_channel::{Receiver, Sender},
     itertools::Itertools,
     rand::Rng,
-    log::{debug, warn, info, error},
+    log::{debug, info, error},
     solana_client::{
         rpc_client::RpcClient, rpc_config::RpcGetVoteAccountsConfig,
         rpc_response::RpcVoteAccountStatus,
@@ -38,8 +36,6 @@ pub struct Config {
     pub min_ingress_nodes: usize,
 }
 
-
-
 pub struct Cluster {
     gossip_push_fanout: usize,
 
@@ -67,10 +63,6 @@ pub struct Cluster {
     // store the adjacency list the MST. src_pubkey => HashSet<dst_pubkey>
     mst: HashMap<Pubkey, HashSet<Pubkey>>, 
 
-    // stores all of the src nodes for a given dst node that is pruned
-    // dst_pubkey => {src_pubkey, hops}
-    prunes: HashMap<Pubkey, HashSet<Pubkey>>,
-
     // get all nodes a src is pushing too
     // src_node => dst_nodes {A, B, C, ..., N}
     pushes: HashMap<Pubkey, HashSet<Pubkey>>,
@@ -79,7 +71,9 @@ pub struct Cluster {
 
     // prunes_v2: self_pubkey => peer => vec<origin>
     // aka who (peer) sent us (self_pubkey) the extra message. and who (origin) created that extra messages
-    prunes_v2: HashMap<Pubkey, HashMap<Pubkey, Vec<Pubkey>>>
+    // pruner => prunee => Vec<origin>. pruner creates prune message. Prunee processes that prune
+    // message, and stops sending messages to pruner.
+    prunes: HashMap<Pubkey, HashMap<Pubkey, Vec<Pubkey>>>,
 }
 
 impl Cluster {
@@ -95,7 +89,6 @@ impl Cluster {
             orders: HashMap::new(),
             mst: HashMap::new(),
             prunes: HashMap::new(),
-            prunes_v2: HashMap::new(),
             pushes: HashMap::new(),
             rmr: gossip_stats::RelativeMessageRedundancy::default(),
         }
@@ -110,7 +103,6 @@ impl Cluster {
         self.orders.clear();
         self.mst.clear();
         self.prunes.clear();
-        self.prunes_v2.clear();
         self.pushes.clear();
         self.rmr.reset();
     }
@@ -137,10 +129,14 @@ impl Cluster {
         dst_node: &Pubkey,
         src_node: &Pubkey,
     ) -> Result<bool, ()> {
-        match self.prunes.get(dst_node) {
-            Some(adjacent_nodes) => Ok(adjacent_nodes.contains(src_node)),
-            None => Err(()),
+        if let Some(adjacent_nodes) = self.prunes.get(dst_node) {
+            if let Some(nodes) = adjacent_nodes.get(src_node) {
+                if !nodes.is_empty() {
+                    return Ok(true);
+                }
+            }
         }
+        Err(())
     }
 
     pub fn edge_exists (
@@ -227,7 +223,7 @@ impl Cluster {
     pub fn get_prunes_v2(
         &self,
     ) -> &HashMap<Pubkey, HashMap<Pubkey, Vec<Pubkey>>> {
-        &self.prunes_v2
+        &self.prunes
     }
 
     pub fn print_hops(
@@ -272,10 +268,10 @@ impl Cluster {
         &self,
     ) {
         info!("PRUNES: ");
-        for (dest, prunes) in &self.prunes {
-            info!("--------- Pruner: {:?} ---------", dest);
-            for prune in prunes {
-                info!("Prunee: {:?}", prune);
+        for (pruner, prunes) in &self.prunes {
+            info!("--------- Pruner: {:?} ---------", pruner);
+            for (prunee, _origin) in prunes {
+                info!("Prunee: {:?}", prunee);
             }
         }
     }
@@ -429,14 +425,6 @@ impl Cluster {
                         // increment the new node (neighbor) to the rmr node count
                         self.rmr.increment_n();
                     } else {
-                        // we have seen this neighbor before. let's prune the current node from the 
-                        // neighbor node's active set.
-                        // neighbor sends "prune" to current_node
-                        self.prunes
-                                .entry(*neighbor)
-                                .or_insert_with(|| HashSet::<Pubkey>::new())
-                                .insert(current_node_pubkey);
-
                         // so above, we increment_m because that is indicating we are sending a new message to a neighbor
                         // but once we send it and it results in a prune, we have to count the responding prune message
                         // so this additional increment_m() is for the return "prune" value
@@ -458,30 +446,6 @@ impl Cluster {
             if pase_counter + 1 != self.gossip_push_fanout {
                 debug!("for src_node {:?}", current_node_pubkey);
                 debug!("WARNING: Only pushed to {} nodes instead of the expected {} nodes!", pase_counter + 1, self.gossip_push_fanout);
-            }
-        }
-    }
-
-    pub fn prune_connections(
-        &mut self,
-        origin: &Pubkey,
-        node_map: &HashMap<Pubkey, &Node>,
-        stakes: &HashMap<Pubkey, u64>,
-    ) {
-        // process prunes as if we received them.
-        // dest sending prunes to all pubkeys in its hashset.
-        // so the pubkey in the hashset is going to be "this node" it is
-        // updating its map after its been pruned.
-        for (dest, prunes) in &self.prunes {
-            // prunes will be "this node"
-            // dest will peer (one sending message to us)
-            // origin is &node[0]. 
-            for self_pubkey in prunes.iter() {
-                let self_node = node_map
-                    .get(self_pubkey)
-                    .unwrap();
-
-                self_node.active_set.prune(self_pubkey, dest, &[*origin], stakes);
             }
         }
     }
@@ -508,10 +472,17 @@ impl Cluster {
                 },
             };
             let mut sorted_hops: Vec<(&Pubkey, &u64)> = sources.iter().collect();
-            sorted_hops.sort_by_key(|&(_, hops)| hops);
+            sorted_hops.sort_by(|&(key1, hops1), &(key2, hops2)| {
+                if hops1 == hops2 {
+                    key1.to_string().cmp(&key2.to_string())
+                } else {
+                    hops1.cmp(hops2)
+                }
+            });
             //call record in the order of fewest to most hops. 
             //each time we run record, we increment num_dups.
             for (count, (src, _)) in sorted_hops.iter().enumerate() {
+                debug!("dest, src, count: {:?}, {:?}, {}", node.pubkey(), src, count);
                 node.received_cache.record(*origin, **src, count)
             }
         }
@@ -547,7 +518,7 @@ impl Cluster {
             // so for current node, all of the peers sent messages to the node
             // that were duplicates. And they did that for messages originating
             // at "origin"
-            self.prunes_v2
+            self.prunes
                 .insert(node.pubkey(), prunes);
         }
 
@@ -555,7 +526,7 @@ impl Cluster {
 
     // pruner has sent prunes to a bunch of nodes. we are going to handle
     // those prunes from the side of the nodes (aka the prunees)
-    pub fn prune_connections_v2(
+    pub fn prune_connections(
         &mut self,
         // origin: &Pubkey,
         node_map: &HashMap<Pubkey, &Node>,
@@ -564,7 +535,7 @@ impl Cluster {
     ) {
         // pruner: sending the prunes.
         // prunes: peers and origins. 
-        for (pruner, prunes) in &self.prunes_v2 {
+        for (pruner, prunes) in &self.prunes {
             // loop through prunes to get the peers that have received prune messages
             // from the pruner.
             debug!("len prunes: {}", prunes.len());
@@ -608,7 +579,7 @@ impl Cluster {
 
 
 pub struct Node {
-    clock: Instant,
+    _clock: Instant,
     num_gossip_rounds: usize,
     pubkey: Pubkey,
     stake: u64,
@@ -617,7 +588,7 @@ pub struct Node {
     // Values are which origins the node has pruned.
     active_set: PushActiveSet,
     received_cache: ReceivedCache,
-    receiver: Receiver<Arc<Packet>>,
+    _receiver: Receiver<Arc<Packet>>,
 }
 
 impl Node {
@@ -686,8 +657,8 @@ pub struct CrdsKey {
 
 #[derive(Debug, Default)]
 pub struct CrdsEntry {
-    ordinal: u64,
-    num_dups: u8,
+    _ordinal: u64,
+    _num_dups: u8,
 }
 
 #[derive(Clone)]
@@ -712,16 +683,16 @@ fn make_gossip_cluster(
     let nodes: Vec<_> = accounts.into_iter().map(|node| {
         let stake = accounts.get(node.0).copied().unwrap_or_default(); //get stake from 
             let pubkey = Pubkey::from_str(&node.0)?;
-            let (sender, receiver) = crossbeam_channel::unbounded();
+            let (sender, _receiver) = crossbeam_channel::unbounded();
             let node = Node {
-                clock: now,
+                _clock: now,
                 num_gossip_rounds: 0,
                 stake,
                 pubkey,
                 table: HashMap::default(),
                 active_set: PushActiveSet::default(),
                 received_cache: ReceivedCache::new(2 * CRDS_UNIQUE_PUBKEY_CAPACITY),
-                receiver,
+                _receiver,
             };
             Ok((node, sender))
         })
@@ -785,16 +756,16 @@ pub fn make_gossip_cluster_for_tests(
     let nodes: Vec<_> = accounts.into_iter().map(|node| {
         let stake = accounts.get(node.0).copied().unwrap_or_default(); //get stake from 
             let pubkey = node.0;
-            let (sender, receiver) = crossbeam_channel::unbounded();
+            let (sender, _receiver) = crossbeam_channel::unbounded();
             let node = Node {
-                clock: now,
+                _clock: now,
                 num_gossip_rounds: 0,
                 stake,
                 pubkey: *pubkey,
                 table: HashMap::default(),
                 active_set: PushActiveSet::default(),
                 received_cache: ReceivedCache::new(2 * CRDS_UNIQUE_PUBKEY_CAPACITY),
-                receiver,
+                _receiver,
             };
             Ok((node, sender))
         })
@@ -962,35 +933,6 @@ mod tests {
         assert_eq!(cluster.edge_exists(&nodes[3].pubkey(), &nodes[5].pubkey()), Err(())); // P -> 5 should not exist (P not in map)
         assert_eq!(cluster.edge_exists(&nodes[0].pubkey(), &nodes[4].pubkey()), Ok(false)); // M -> j should not exist
         assert_eq!(cluster.edge_exists(&nodes[4].pubkey(), &nodes[5].pubkey()), Ok(false)); // j -> 5 should not exist
-
-        // PRUNES
-        // 5 dest
-        assert_eq!(cluster.get_num_prunes_by_dest(&nodes[5].pubkey()), Err(())); // 5 should not be in prune list it is the origin
-
-        // j dest
-        assert_eq!(cluster.get_num_prunes_by_dest(&nodes[4].pubkey()), Ok(2)); // j prune P and 3
-        assert_eq!(cluster.prune_exists(&nodes[4].pubkey(), &nodes[3].pubkey()), Ok(true)); // j prune P (p sent dup to j, so it got pruned)
-        assert_eq!(cluster.prune_exists(&nodes[4].pubkey(), &nodes[2].pubkey()), Ok(true)); // j prune 3
-
-        // M dest
-        assert_eq!(cluster.get_num_prunes_by_dest(&nodes[0].pubkey()), Ok(2)); // M prune 3, h
-        assert_eq!(cluster.prune_exists(&nodes[0].pubkey(), &nodes[2].pubkey()), Ok(true)); // M prune 3
-        assert_eq!(cluster.prune_exists(&nodes[0].pubkey(), &nodes[1].pubkey()), Ok(true)); // M prune h
-
-        // 3 dest
-        assert_eq!(cluster.get_num_prunes_by_dest(&nodes[2].pubkey()), Ok(2)); // 3 prune M, P
-        assert_eq!(cluster.prune_exists(&nodes[2].pubkey(), &nodes[0].pubkey()), Ok(true)); // 3 prune M
-        assert_eq!(cluster.prune_exists(&nodes[2].pubkey(), &nodes[3].pubkey()), Ok(true)); // 3 prune P
-
-        // P dest
-        assert_eq!(cluster.get_num_prunes_by_dest(&nodes[3].pubkey()), Ok(1)); // P prune h
-        assert_eq!(cluster.prune_exists(&nodes[3].pubkey(), &nodes[1].pubkey()), Ok(true)); // P prune h
-
-        // Test if connections in MST end up in prunes. shouldn't be any MST edges in prunes
-        assert_eq!(cluster.prune_exists(&nodes[4].pubkey(), &nodes[5].pubkey()), Ok(false)); // MST: j prune 5, no 5->j in mst
-        assert_eq!(cluster.prune_exists(&nodes[0].pubkey(), &nodes[4].pubkey()), Ok(false)); // MST: M prune j, no j->M in mst
-        assert_eq!(cluster.prune_exists(&nodes[1].pubkey(), &nodes[0].pubkey()), Err(())); // MST: h prune M, Err. no M->h in mst. h doesn't prune anyone
-        assert_eq!(cluster.prune_exists(&nodes[5].pubkey(), &nodes[3].pubkey()), Err(()));   // MST: 5 prune P, Err. P->5 doesn't exist
 
         // m: 19, n: 6
         // 19 / (6 - 1) - 1 = 2.8

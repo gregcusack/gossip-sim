@@ -1,9 +1,7 @@
 use {
-    crossbeam_channel::Sender,
-    rand::Rng,
     solana_client::client_error::ClientError,
     solana_sdk::pubkey::{ParsePubkeyError, Pubkey},
-    std::{collections::HashMap, fmt::Debug},
+    std::fmt::Debug,
     thiserror::Error,
 };
 
@@ -73,48 +71,6 @@ impl std::fmt::Display for Stats {
             Stats::Median(x) => write!(f, "Median: {:.6}", x),
             Stats::Max(x) => write!(f, "Max: {:.6}", x),
             Stats::Min(x) => write!(f, "Min: {:.6}", x),
-        }
-    }
-}
-
-pub struct Router<T> {
-    packet_drop_rate: f64,
-    senders: HashMap<Pubkey, Sender<T>>,
-}
-
-impl<T> Router<T> {
-    pub fn new<I>(packet_drop_rate: f64, nodes: I) -> Result<Self, RouterError>
-    where
-        I: IntoIterator<Item = (Pubkey, Sender<T>)>,
-    {
-        if !(0.0..=1.0).contains(&packet_drop_rate) {
-            return Err(RouterError::InvalidPacketDropRate(packet_drop_rate));
-        }
-        let mut senders = HashMap::<Pubkey, Sender<T>>::new();
-        for (pubkey, sender) in nodes {
-            if senders.insert(pubkey, sender).is_some() {
-                return Err(RouterError::DuplicatePubkey(pubkey));
-            }
-        }
-        Ok(Self {
-            packet_drop_rate,
-            senders,
-        })
-    }
-}
-
-impl<T> Router<T> {
-    fn send<R: Rng>(&self, rng: &mut R, node: &Pubkey, data: T) -> Result<(), RouterError> {
-        // TODO: How to simulate packets arriving with delay?
-        match self.senders.get(node) {
-            None => Err(RouterError::NodeNotFound(*node)),
-            Some(route) => {
-                if rng.gen_bool(self.packet_drop_rate) {
-                    Ok(()) // Silently drop packet
-                } else {
-                    route.send(data).map_err(|_| RouterError::SendError)
-                }
-            }
         }
     }
 }
