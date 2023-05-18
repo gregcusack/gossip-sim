@@ -58,16 +58,113 @@ cargo run --bin write-accounts -- --num-nodes <num-nodes> --account-file <path-t
 - Read accounts from the file you created in (Option 1) and simulate the network
     - Note it will simulate all of the accounts in the file. 
 ```
-cargo run --bin gossip-sim -- --account-file <path-to-yaml-file> --accounts-from-yaml --push-fanout <push_fanout> --active-set-size <active_set_size> --iterations <number_of_gossip_iterations> --origin-rank <origin_stake_rank> -p <probability-of-active-set-rotation> --min-ingress-nodes <min-ingress-nodes> --stake-threshold <min-stake-threshol>
+cargo run --bin gossip-sim --
+    --account-file <path-to-yaml-file> 
+    --accounts-from-yaml 
+    --push-fanout <push_fanout> 
+    --active-set-size <active_set_size> 
+    --iterations <number_of_gossip_iterations> 
+    --origin-rank <origin_stake_rank> 
+    --rotation-probability <probability-of-active-set-rotation> 
+    --min-ingress-nodes <min-ingress-nodes> 
+    --stake-threshold <min-stake-threshold>
 ```
 #### Option 3: Pull accounts from mainnet and run simulation
 - This will pull all node accounts from mainnet and simulate the network.
 ```
-cargo run --bin gossip-sim -- --account-file `<path-to-yaml-file>` --accounts-from-yaml --push-fanout <push_fanout> --active-set-size <active_set_size> --iterations <number_of_gossip_iterations> --origin-rank <origin_stake_rank> -p <probability-of-active-set-rotation> --min-ingress-nodes <min-ingress-nodes> --stake-threshold <min-stake-threshol>
+cargo run --bin gossip-sim --
+    --push-fanout <push_fanout> 
+    --active-set-size <active_set_size> 
+    --iterations <number_of_gossip_iterations> 
+    --origin-rank <origin_stake_rank> 
+    --rotation-probability <probability-of-active-set-rotation> 
+    --min-ingress-nodes <min-ingress-nodes> 
+    --stake-threshold <min-stake-threshold>
 ```
 
 ## Interpreting the output
-- Prints out high level information about the network you are simulation. number of accounts, total stake, etc
+Prints out coverage, RMR, Aggregate Hop info, LDH, stranded nodes
+- Coverage:
+    - Number of nodes that received a message from an origin / Number of nodes in the network
+    - Mean, Median, Max, Min across all gossip iterations
+- RMR (Relative Message Redundancy)
+    - `RMR = m / (n-1) - 1, for n > 1`
+    - m: total number of payload messages exchanged during gossip (push and prune)
+    - n: total number of nodes that received the message
+    - Mean, Median, Max, Min across all gossip iterations
+- Aggregate Hop Info
+    - Number of hops required to deliver a message 
+    - Mean, Median, Max across all gossip iterations
+- LDH (Last Delivery Hop)
+    - Max number of hops required to transmit a message from an origin
+    - Mean, Median, Max, Min across all gossip iterations
+- Stranded Nodes
+    - Identifies when a node did not receive a message from an origin
+    - Pubkey and stake of stranded nodes and how many times (gossip iterations) that node was stranded
+
+```
+|------------------------|
+|---- COVERAGE STATS ----|
+|------------------------|
+Number of iterations: 400
+Coverage Mean: 0.984000
+Coverage Median: 0.983333
+Coverage Max: 0.996667
+Coverage Min: 0.960000
+|-------------------------------------------------|
+|---- RELATIVE MESSAGE REDUNDANCY (RMR) STATS ----|
+|-------------------------------------------------|
+Number of iterations: 400
+RMR Mean: 3.107014
+RMR Median: 2.202361
+RMR Max: 10.041812
+RMR Min: 1.836177
+|---------------------------------|
+|------ AGGREGATE HOP STATS ------|
+|---------------------------------|
+Aggregate Hops Mean: Mean: 4.497764
+Aggregate Hops Median: Median: 4.00
+Aggregate Hops Max: Max: 11
+|-------------------------------------|
+|------ LAST DELIVERY HOP STATS ------|
+|-------------------------------------|
+LDH Mean: Mean: 9.455000
+LDH Median: Median: 9.00
+LDH Max: Max: 11
+LDH Min: Min: 7
+|----------------------------------------------------------|
+|---- STRANDED NODES (Pubkey, stake, # times stranded) ----|
+|----------------------------------------------------------|
+Total stranded nodes: 41
+BiSnfKPz671sajgRcvDbWEa6jG41WQFwTyPgQsSQb1qL,	0,		        106
+9T6SNsBimjCRJpkEjiVsc8AcxTBa1XVA7RjnBGGfWP23,	75166146859914,	110
+GKNG9M61nZmuEcUou4bMnonKh24wY1sNDYWp88ig2gRn,	2000000,	    236
+F5vxLRkYehYWEKPAUyph36EFakpXbsZDBLqysEsy8E8Q,	0,		        10
+73hojLdq1vZDSxeVQEqVFJ4iwLngdvEJPEpEHkSdv6BZ,	307649174851299,28
+...
+7QYESzKZ1qttXDND58pWPpH5tBhEcwBWxa6GCJNTugF7,	105137195473920,32
+
+```
+
+## Progress
+- [x] Initialize all node with respective stakes and simulated active_sets
+- [x] Given a message from an origin and all nodes' stakes and active sets, track a message throughout the network
+- [x] Determine the minimum number of hops the message takes to reach all nodes in the network
+- [x] For a given destination node and its inbound neighbors, determine which neighbor was first, second, third, etc to deliver the message
+- [x] Determine coverage of network. # of nodes Rx message / # of nodes in network.
+- [x] Measure Relative Message Redundancy (RMR)
+- [x] Measure Last Hop Delivery (LHD)
+- [x] Identify MST src->vec<dest>
+- [x] Identify dest->vec<src> prunes
+- [x] write tests for above
+- [x] implement pruning logic.
+- [x] measure coverage for different `CRDS_GOSSIP_PUSH_FANOUT` and `CRDS_GOSSIP_PUSH_ACTIVE_SET_SIZE`
+- [x] maintain minimum stake threshold and minimum incoming connections when pruning
+
+## Caveat
+- We do not simulate pull requests
+
+## Below output can be printed out using a Debug log level.
 - Prints out all of the account pubkeys and stakes. e.g.
 ```
 ...
@@ -161,31 +258,4 @@ D -> C
 ```
 
 
-
-## Caveat
-- We do not simulate pull requests
-
-## Progress
-- [x] Initialize all node with respective stakes and simulated active_sets
-- [x] Given a message from an origin and all nodes' stakes and active sets, track a message throughout the network
-- [x] Determine the minimum number of hops the message takes to reach all nodes in the network
-- [x] For a given destination node and its inbound neighbors, determine which neighbor was first, second, third, etc to deliver the message
-- [x] Determine coverage of network. # of nodes Rx message / # of nodes in network.
-- [x] Measure Relative Message Redundancy (RMR)
-- [x] Measure Last Hop Delivery (LHD)
-- [x] Identify MST src->vec<dest>
-- [x] Identify dest->vec<src> prunes
-- [x] write tests for above
-- [x] implement pruning logic.
-- [x] measure coverage for different `CRDS_GOSSIP_PUSH_FANOUT` and `CRDS_GOSSIP_PUSH_ACTIVE_SET_SIZE`
-- [x] maintain minimum stake threshold and minimum incoming connections when pruning
-
-
-
-## Questions to be answered
-- Do low staked nodes ever get starved (no one pushes to them/not a part of a spanning tree)
-
-## Configurable Parameters
-- Number of nodes to sim
-- Stake of nodes
 
