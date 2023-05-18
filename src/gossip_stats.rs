@@ -26,9 +26,10 @@ impl Default for HopsStat {
 
 impl HopsStat {
     pub fn new(
-        distances: &HashMap<Pubkey, u64>
+        // distances: &HashMap<Pubkey, u64>
+        hops: &mut Vec<u64>,
     ) -> HopsStat {
-        let mut hops: Vec<u64> = distances.values().cloned().collect();
+        // let mut hops: Vec<u64> = hops.values().cloned().collect();
         hops.sort();
 
         let hops: Vec<u64> = hops
@@ -114,13 +115,19 @@ impl HopsStat {
 // if we run multiple MSTs, this will keep track of the hops
 // over the course of multiple runs.
 pub struct HopsStatCollection {
-    stats: Vec<HopsStat>,
+    per_round_stats: Vec<HopsStat>,
+    raw_hop_collection: Vec<u64>, // all hop counts seen
+    aggregate_stats: HopsStat,
+    last_delivery_hop_stats: HopsStat,
 }
 
 impl Default for HopsStatCollection {
     fn default() -> Self {
         Self {
-            stats: Vec::default(),
+            per_round_stats: Vec::default(),
+            raw_hop_collection: Vec::default(),
+            aggregate_stats: HopsStat::default(),
+            last_delivery_hop_stats: HopsStat::default(),
         }
     }
 }
@@ -128,16 +135,51 @@ impl Default for HopsStatCollection {
 impl HopsStatCollection {
     pub fn insert(
         &mut self,
-        stat: HopsStat,
+        // distances: &HashMap<Pubkey, u64>,
+        hops: &mut Vec<u64>,
     ) {
-        self.stats.push(stat);
+        self.per_round_stats.push(HopsStat::new(hops));
+        
+        for hops in hops
+            .iter()
+            .filter(|hops| *hops != &u64::MAX) {
+                self.raw_hop_collection.push(*hops);
+        }
     }
 
     pub fn get_stat_by_iteration(
-        &self,
+        &mut self,
         index: usize,
     ) -> &HopsStat {
-        &self.stats[index]
+        &self.per_round_stats[index]
+    }
+
+    pub fn aggregate_hop_stats(
+        &mut self,
+    ) {
+        self.aggregate_stats = HopsStat::new(&mut self.raw_hop_collection);
+    }
+
+    pub fn get_aggregate_hop_stats(
+        &self,
+    ) -> &HopsStat {
+        &self.aggregate_stats
+    }
+
+    pub fn calc_last_delivery_hop_stats(
+        &mut self,
+    ) {
+        let mut vec: Vec<u64> = Vec::new();
+        for hopstat in self.per_round_stats.iter() {
+            vec.push(hopstat.max());
+        }
+        self.last_delivery_hop_stats = HopsStat::new(&mut vec);
+    }
+
+    pub fn get_last_delivery_hop_stats(
+        &self,
+    ) -> &HopsStat {
+        &self.last_delivery_hop_stats
     }
 }
 
@@ -197,14 +239,14 @@ impl CoverageStatsCollection {
         &self,
     ) {
         info!("Number of iterations: {}", self.coverages.len());
-        let formatted: String = self.coverages
-            .iter()
-            .map(|&f| format!("{:.6}", f))
-            .collect::<Vec<String>>()
-            .join("\n");
+        // let formatted: String = self.coverages
+        //     .iter()
+        //     .map(|&f| format!("{:.6}", f))
+        //     .collect::<Vec<String>>()
+        //     .join("\n");
 
-        let output = format!("Coverages:\n{}", formatted);
-        info!("{}", output);
+        // let output = format!("Coverages:\n{}", formatted);
+        // info!("{}", output);
 
         info!("Coverage {}", self.mean);
         info!("Coverage {}", self.median);
@@ -334,14 +376,14 @@ impl RelativeMessageRedundancyCollection {
         &self,
     ) {
         info!("Number of iterations: {}", self.rmrs.len());
-        let formatted: String = self.rmrs
-            .iter()
-            .map(|&f| format!("{:.6}", f))
-            .collect::<Vec<String>>()
-            .join("\n");
+        // let formatted: String = self.rmrs
+        //     .iter()
+        //     .map(|&f| format!("{:.6}", f))
+        //     .collect::<Vec<String>>()
+        //     .join("\n");
 
-        let output = format!("RMRs:\n{}", formatted);
-        info!("{}", output);
+        // let output = format!("RMRs:\n{}", formatted);
+        // info!("{}", output);
 
         info!("RMR {}", self.mean);
         info!("RMR {}", self.median);
@@ -427,12 +469,15 @@ impl Default for GossipStats {
 }
 
 impl GossipStats {
-
     pub fn insert_hops_stat(
         &mut self,
-        stat: HopsStat,
+        distances: &HashMap<Pubkey, u64>,
     ) {
-        self.hops_stats.insert(stat);
+        self.hops_stats.insert(
+            &mut distances
+                .values()
+                .cloned()
+                .collect());
     }
 
     pub fn print_hops_stats(
@@ -442,12 +487,40 @@ impl GossipStats {
         info!("|------ HOPS STATS ------|");
         info!("|------------------------|");         
         for (iteration, stat) in self.hops_stats
-            .stats
+            .per_round_stats
             .iter()
             .enumerate() {
                 info!("Iteration: {}", iteration);
                 stat.print_stats();
         }
+    }
+
+    pub fn print_aggregate_hop_stats(
+        &mut self,
+    ) {
+        info!("|---------------------------------|");
+        info!("|------ AGGREGATE HOP STATS ------|");
+        info!("|---------------------------------|");     
+        self.hops_stats.aggregate_hop_stats();
+        let stats = self.hops_stats.get_aggregate_hop_stats();
+        info!("Aggregate Hops Mean: {}", stats.mean);
+        info!("Aggregate Hops Median: {}", stats.median);
+        info!("Aggregate Hops Max: {}", stats.max);
+
+    }
+
+    pub fn print_last_delivery_hop_stats(
+        &mut self,
+    ) {
+        info!("|-------------------------------------|");
+        info!("|------ LAST DELIVERY HOP STATS ------|");
+        info!("|-------------------------------------|");     
+        self.hops_stats.calc_last_delivery_hop_stats();
+        let stats = self.hops_stats.get_last_delivery_hop_stats();
+        info!("LDH Mean: {}", stats.mean);
+        info!("LDH Median: {}", stats.median);
+        info!("LDH Max: {}", stats.max);
+        info!("LDH Min: {}", stats.min);
     }
 
     pub fn insert_coverage(
@@ -525,6 +598,8 @@ impl GossipStats {
         self.print_coverage_stats();
         self.calculate_rmr_stats();
         self.print_rmr_stats();
+        self.print_aggregate_hop_stats();
+        self.print_last_delivery_hop_stats();
         self.print_stranded();
         // self.print_hops_stats();
     }

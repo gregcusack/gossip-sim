@@ -272,11 +272,13 @@ fn main() {
         );
         
         stats.insert_coverage(coverage);
-        stats.insert_hops_stat(
-            HopsStat::new(
-                cluster.get_distances()
-            )
-        );
+        // stats.insert_hops_stat(
+        //     HopsStat::new(
+        //         cluster.get_distances()
+        //     )
+        // );
+
+        stats.insert_hops_stat(cluster.get_distances());
 
         if log::log_enabled!(Level::Debug) {
             cluster.print_pushes();
