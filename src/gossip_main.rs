@@ -239,9 +239,9 @@ fn main() {
     let mut _number_of_poor_coverage_runs: usize = 0;
     let poor_coverage_threshold: f64 = 0.95;
     let mut stats = GossipStats::default();
+    info!("Calculating the MSTs for origin: {:?}", origin_pubkey);
     for i in 0..config.gossip_iterations {
         info!("MST ITERATION: {}", i);
-        info!("Calculating the MST for origin: {:?}", origin_pubkey);
         {
             let node_map: HashMap<Pubkey, &Node> = nodes
                 .iter()
@@ -261,14 +261,16 @@ fn main() {
         let (coverage, stranded_nodes) = cluster.coverage(&stakes);
         debug!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
         debug!("{} nodes are stranded", stranded_nodes);
-        // if stranded_nodes > 0 {
-        //     cluster.stranded_nodes(&stakes);
-        // }
         if coverage < poor_coverage_threshold {
             warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
             _number_of_poor_coverage_runs += 1;
         }
-    
+
+        stats.insert_stranded_nodes(
+            cluster.stranded_nodes(), 
+            &stakes
+        );
+        
         stats.insert_coverage(coverage);
         stats.insert_hops_stat(
             HopsStat::new(
@@ -282,7 +284,6 @@ fn main() {
 
         match cluster.relative_message_redundancy() {
             Ok(result) => {
-                info!("Network RMR: {:.6}", result);
                 stats.insert_rmr(result);
             },
             Err(_) => error!("Network RMR error. # of nodes is 1."),

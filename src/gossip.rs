@@ -37,23 +37,6 @@ pub struct Config<'a> {
     pub min_ingress_nodes: usize,
 }
 
-// impl<'a> std::fmt::Display for Config<'a> {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         writeln!(f, "Gossip Push Fanout: {}\n", self.gossip_push_fanout)?;
-//         writeln!(f, "Gossip Active Set Size: {}\n", self.gossip_active_set_size)?;
-//         writeln!(f, "Gossip Iterations: {}\n", self.gossip_iterations)?;
-//         writeln!(f, "Accounts From File: {}\n", self.accounts_from_file)?;
-//         writeln!(f, "Account File: {}\n", self.account_file)?;
-//         writeln!(f, "Origin Rank: {}\n", self.origin_rank)?;
-//         writeln!(f, "Probability of Rotation: {}\n", self.probability_of_rotation)?;
-//         writeln!(f, "Prune Stake Threshold: {}\n", self.prune_stake_threshold)?;
-//         writeln!(f, "Minimum Ingress Nodes: {}\n", self.min_ingress_nodes)?;
-
-//         Ok(())
-//     }
-// }
-
-
 pub struct Cluster {
     gossip_push_fanout: usize,
 
@@ -219,17 +202,16 @@ impl Cluster {
 
     pub fn stranded_nodes(
         &self,
-        stakes: &HashMap<Pubkey, u64>,
-    ) {
-        info!("Stranded Nodes, stakes: ");
+    ) -> Vec<Pubkey> {
+        let mut stranded_pubkeys: Vec<Pubkey> = Vec::new();
+
         for (pubkey, hops) in self.distances.iter() {
             if hops == &u64::MAX {
-                let stake = stakes
-                                    .get(pubkey)
-                                    .unwrap();
-                info!("{:?}, {}", pubkey, stake);
+                stranded_pubkeys.push(*pubkey);
             }
         }
+
+        stranded_pubkeys
     }
 
     pub fn get_distances(
@@ -583,7 +565,7 @@ impl Cluster {
         seeded_rng: &mut StdRng,
 
     ) {
-        info!("Rotating Active Sets....");
+        debug!("Rotating Active Sets....");
         for node in nodes {
             if seeded_rng.gen::<f64>() < probability_of_rotation {
                 debug!("Rotating Active Set for: {:?}", node.pubkey());

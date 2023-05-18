@@ -1,7 +1,6 @@
-
 use {
     crate::{Stats, HopsStats},
-    log::info,
+    log::{info, error},
     std::collections::HashMap,
     solana_sdk::pubkey::Pubkey,
 };
@@ -335,12 +334,6 @@ impl RelativeMessageRedundancyCollection {
         &self,
     ) {
         info!("Number of iterations: {}", self.rmrs.len());
-        // info!("RMRs: {}", self.rmrs
-        //     .iter()
-        //     .map(|n| format!("{:.6}", n))
-        //     .collect::<Vec<String>>()
-        //     .join(", ")
-        // );
         let formatted: String = self.rmrs
             .iter()
             .map(|&f| format!("{:.6}", f))
@@ -357,10 +350,69 @@ impl RelativeMessageRedundancyCollection {
     }
 }
 
+pub struct StrandedNodeCollection {
+    stranded_nodes: HashMap<Pubkey, (/* stake */u64, /* times stranded */ u64)>, 
+}
+
+impl Default for StrandedNodeCollection {
+    fn default() -> Self {
+        Self {
+            stranded_nodes: HashMap::default(),
+        }
+    }
+}
+
+impl StrandedNodeCollection {
+    fn increment_stranded_count(
+        &mut self,
+        pubkey: &Pubkey,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        // Check if the pubkey has already been stranded
+        if let Some((_, count)) = self.stranded_nodes.get_mut(pubkey) {
+            // Increment the number of times its been stranded
+            *count += 1;
+        } else {
+            // if pubkey has not been stranded before, add a new entry using stake from stakes map
+            if let Some(&stake) = stakes.get(pubkey) {
+                self.stranded_nodes.insert(*pubkey, (stake, 1));
+            } else {
+                // We should never get here. stakes should hold all values in map
+                error!("Stake for pubkey {:?} not found", pubkey);
+            }
+        }
+    }
+
+    pub fn insert_nodes(
+        &mut self,
+        stranded_nodes: Vec<Pubkey>,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        for pubkey in stranded_nodes.iter() {
+            self.increment_stranded_count(pubkey, stakes);
+        }
+    }
+
+    pub fn get_stranded(
+        &self,
+    ) -> &HashMap<Pubkey, (u64, u64)> {
+        &self.stranded_nodes
+    }
+
+    pub fn stranded_count(
+        &self,
+    ) -> usize {
+        self.stranded_nodes.len()
+    }
+
+
+}
+
 pub struct GossipStats {
     hops_stats: HopsStatCollection,
     coverage_stats: CoverageStatsCollection,
     relative_message_redundancy_stats: RelativeMessageRedundancyCollection,
+    stranded_nodes: StrandedNodeCollection,
 }
 
 impl Default for GossipStats {
@@ -369,6 +421,7 @@ impl Default for GossipStats {
             hops_stats: HopsStatCollection::default(), 
             coverage_stats: CoverageStatsCollection::default(),
             relative_message_redundancy_stats: RelativeMessageRedundancyCollection::default(),
+            stranded_nodes: StrandedNodeCollection::default(),
         }
     }
 }
@@ -441,6 +494,30 @@ impl GossipStats {
         self.relative_message_redundancy_stats.print_stats();
     }
 
+    pub fn insert_stranded_nodes(
+        &mut self,
+        stranded_nodes: Vec<Pubkey>,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        self.stranded_nodes.insert_nodes(stranded_nodes, stakes);
+    }
+
+    pub fn print_stranded(
+        &self,
+    ) {
+        info!("|----------------------------------------------------------|");
+        info!("|---- STRANDED NODES (Pubkey, stake, # times stranded) ----|");
+        info!("|----------------------------------------------------------|"); 
+        info!("Total stranded nodes: {}", self.stranded_nodes.stranded_count());
+        for (node, (stake, count)) in self.stranded_nodes.get_stranded().iter() {
+            if stake == &0 {
+                info!("{:?},\t{},\t\t{}", node, stake, count);
+            } else {
+                info!("{:?},\t{},\t{}", node, stake, count);
+            }
+        }
+    }
+
     pub fn print_all(
         &mut self,
     ) {
@@ -448,7 +525,8 @@ impl GossipStats {
         self.print_coverage_stats();
         self.calculate_rmr_stats();
         self.print_rmr_stats();
-        self.print_hops_stats();
+        self.print_stranded();
+        // self.print_hops_stats();
     }
 
 }
