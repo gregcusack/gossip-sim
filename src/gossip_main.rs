@@ -13,7 +13,6 @@ use {
         },
         gossip_stats::{
             GossipStats,
-            HopsStat,
         },
     },
     solana_client::rpc_client::RpcClient,
@@ -54,6 +53,13 @@ fn parse_matches() -> ArgMatches {
                 .value_name("VOTE_ACCOUNTS_FROM_FILE")
                 .takes_value(false)
                 .help("set to read in key/stake pairs from yaml. use with --acount-file <path>"),
+        )
+        .arg(
+            Arg::with_name("remove_zero_staked_nodes")
+                .long("filter-zero-staked-nodes")
+                .short('f')
+                .takes_value(false)
+                .help("Filter out all zero-staked nodes"),
         )
         .arg(
             Arg::with_name("gossip_push_fanout")
@@ -169,7 +175,8 @@ fn main() {
         origin_rank: value_t_or_exit!(matches, "origin_rank", usize),
         probability_of_rotation: value_t_or_exit!(matches, "active_set_rotation_probability", f64),
         prune_stake_threshold: value_t_or_exit!(matches, "prune_stake_threshold", f64), 
-        min_ingress_nodes: value_t_or_exit!(matches, "min_ingress_nodes", usize), 
+        min_ingress_nodes: value_t_or_exit!(matches, "min_ingress_nodes", usize),
+        filter_zero_staked_nodes: matches.is_present("remove_zero_staked_nodes"),
     };
 
     // check if we want to write keys and stakes to a file
@@ -188,7 +195,7 @@ fn main() {
         info!("Reading {}", config.account_file);
         let accounts: HashMap<String, u64> = serde_yaml::from_reader(file).unwrap();
         info!("{} accounts read in", accounts.len());
-        let nodes = make_gossip_cluster_from_map(&accounts);
+        let nodes = make_gossip_cluster_from_map(&accounts, config.filter_zero_staked_nodes);
         nodes
 
     } else {
@@ -196,7 +203,7 @@ fn main() {
             gossip_sim::get_json_rpc_url(matches.value_of("json_rpc_url").unwrap_or_default());
         info!("json_rpc_url: {}", json_rpc_url);
         let rpc_client = RpcClient::new(json_rpc_url);
-        let nodes = make_gossip_cluster_from_rpc(&rpc_client);
+        let nodes = make_gossip_cluster_from_rpc(&rpc_client, config.filter_zero_staked_nodes);
         nodes
     }.unwrap();
 
@@ -239,7 +246,7 @@ fn main() {
     let mut _number_of_poor_coverage_runs: usize = 0;
     let poor_coverage_threshold: f64 = 0.95;
     let mut stats = GossipStats::default();
-    info!("Calculating the MSTs for origin: {:?}", origin_pubkey);
+    info!("Calculating the MSTs for origin: {:?}, stake: {}", origin_pubkey, stakes.get(origin_pubkey).unwrap());
     for i in 0..config.gossip_iterations {
         info!("MST ITERATION: {}", i);
         {

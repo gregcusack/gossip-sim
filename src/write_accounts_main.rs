@@ -49,6 +49,13 @@ fn parse_matches() -> ArgMatches {
                 .takes_value(false)
                 .help("set if you only want zero-staked nodes"),
         )
+        .arg(
+            Arg::with_name("remove_zero_staked_nodes")
+                .long("filter-zero-staked-nodes")
+                .short('f')
+                .takes_value(false)
+                .help("Filter out all zero-staked nodes"),
+        )
         .get_matches()
 }
 
@@ -73,13 +80,14 @@ fn main() {
 
     // get account_file to write accounts to
     let account_file = matches.value_of("account_file").unwrap_or_default();
+    let filter_zero_staked_nodes = matches.is_present("remove_zero_staked_nodes");
 
     // default is just to write stakes pulled from the mainnet API
     let json_rpc_url =
         gossip_sim::get_json_rpc_url(matches.value_of("json_rpc_url").unwrap_or_default());
     info!("json_rpc_url: {}", json_rpc_url);
     let rpc_client = RpcClient::new(json_rpc_url);
-    let nodes: Vec<(Node, crossbeam_channel::Sender<Arc<Packet>>)> = make_gossip_cluster_from_rpc(&rpc_client).unwrap();
+    let nodes: Vec<(Node, crossbeam_channel::Sender<Arc<Packet>>)> = make_gossip_cluster_from_rpc(&rpc_client, filter_zero_staked_nodes).unwrap();
 
     // number of accounts to write to file. will write the first N accounts
     let num_nodes: u64 = matches.value_of("number_of_nodes").unwrap_or_default().parse().unwrap();

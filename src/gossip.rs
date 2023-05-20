@@ -35,6 +35,7 @@ pub struct Config<'a> {
     pub probability_of_rotation: f64,
     pub prune_stake_threshold: f64,
     pub min_ingress_nodes: usize,
+    pub filter_zero_staked_nodes: bool,
 }
 
 pub struct Cluster {
@@ -675,28 +676,34 @@ pub enum Packet {
 }
 
 fn make_gossip_cluster(
-    accounts: &HashMap<String, u64>
+    accounts: &HashMap<String, u64>,
+    filter_zero_staked_nodes: bool,
 ) -> Result<Vec<(Node, Sender<Arc<Packet>>)>, Error> {
     info!("num of node pubkeys in vote accounts: {}", accounts.len());
     let now = Instant::now();
 
-    let nodes: Vec<_> = accounts.into_iter().map(|node| {
-        let stake = accounts.get(node.0).copied().unwrap_or_default(); //get stake from 
-            let pubkey = Pubkey::from_str(&node.0)?;
-            let (sender, _receiver) = crossbeam_channel::unbounded();
-            let node = Node {
-                _clock: now,
-                num_gossip_rounds: 0,
-                stake,
-                pubkey,
-                table: HashMap::default(),
-                active_set: PushActiveSet::default(),
-                received_cache: ReceivedCache::new(2 * CRDS_UNIQUE_PUBKEY_CAPACITY),
-                _receiver,
-            };
-            Ok((node, sender))
-        })
-        .collect::<Result<_, Error>>()?;
+    // create node vector.
+    // filter out 0 staked nodes if filter_zero_staked_nodes is true 
+    let nodes: Vec<_> = accounts
+        .into_iter()
+        .filter(|(_, stake)| !filter_zero_staked_nodes || **stake != 0) 
+        .map(|node| {
+            let stake = accounts.get(node.0).copied().unwrap_or_default(); //get stake from 
+                let pubkey = Pubkey::from_str(&node.0)?;
+                let (sender, _receiver) = crossbeam_channel::unbounded();
+                let node = Node {
+                    _clock: now,
+                    num_gossip_rounds: 0,
+                    stake,
+                    pubkey,
+                    table: HashMap::default(),
+                    active_set: PushActiveSet::default(),
+                    received_cache: ReceivedCache::new(2 * CRDS_UNIQUE_PUBKEY_CAPACITY),
+                    _receiver,
+                };
+                Ok((node, sender))
+            })
+            .collect::<Result<_, Error>>()?;
 
     let num_nodes_staked = nodes
         .iter()
@@ -713,14 +720,16 @@ fn make_gossip_cluster(
 
 #[allow(clippy::type_complexity)]
 pub fn make_gossip_cluster_from_map(
-    accounts: &HashMap<String, u64>
+    accounts: &HashMap<String, u64>,
+    filter_zero_staked_nodes: bool,
 ) -> Result<Vec<(Node, Sender<Arc<Packet>>)>, Error> {
-    make_gossip_cluster(&accounts)
+    make_gossip_cluster(&accounts, filter_zero_staked_nodes)
 }
 
 #[allow(clippy::type_complexity)]
 pub fn make_gossip_cluster_from_rpc(
     rpc_client: &RpcClient,
+    filter_zero_staked_nodes: bool,
 ) -> Result<Vec<(Node, Sender<Arc<Packet>>)>, Error> {
     let config = RpcGetVoteAccountsConfig {
         vote_pubkey: None,
@@ -735,6 +744,7 @@ pub fn make_gossip_cluster_from_rpc(
         vote_accounts.current.len() + vote_accounts.delinquent.len()
     );
     //get map of node stakes (Node Pubkey => stake)
+    // filter out zero-staked nodes if filter_zero_staked_nodes is true 
     let stakes: HashMap</*node pubkey:*/ String, /*activated stake:*/ u64> = vote_accounts
         .current
         .iter()
@@ -742,9 +752,12 @@ pub fn make_gossip_cluster_from_rpc(
         .into_grouping_map_by(|info| info.node_pubkey.clone())
         .aggregate(|stake, _node_pubkey, vote_account_info| {
             Some(stake.unwrap_or_default() + vote_account_info.activated_stake)
-        });
+        })
+        .into_iter()
+        .filter(|(_, stake)| !filter_zero_staked_nodes || *stake != 0)
+        .collect();
     
-    make_gossip_cluster(&stakes)
+    make_gossip_cluster(&stakes, filter_zero_staked_nodes)
 }
 
 pub fn make_gossip_cluster_for_tests(
