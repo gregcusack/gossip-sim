@@ -394,6 +394,7 @@ impl RelativeMessageRedundancyCollection {
 
 pub struct StrandedNodeCollection {
     stranded_nodes: HashMap<Pubkey, (/* stake */u64, /* times stranded */ u64)>, 
+    
 }
 
 impl Default for StrandedNodeCollection {
