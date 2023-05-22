@@ -394,6 +394,16 @@ impl RelativeMessageRedundancyCollection {
 
 pub struct StrandedNodeCollection {
     stranded_nodes: HashMap<Pubkey, (/* stake */u64, /* times stranded */ u64)>, 
+    /*
+    mean stranded nodes per iteration
+    median stranded nodes per iteration
+    histogram -> # of nodes stranded for n iterations
+    total number of stranded node iterations -> number of nodes: 15,000 total iterations stranded.
+     */
+    total_iterations: u64,
+    total_stranded_iterations: u64, // sum(times_stranded)
+    mean_stranded_per_iteration: f64, // sum(times_stranded) / iterations
+    median_stranded_per_iteration: f64, // median(times_stranded)
     
 }
 
@@ -401,6 +411,10 @@ impl Default for StrandedNodeCollection {
     fn default() -> Self {
         Self {
             stranded_nodes: HashMap::default(),
+            total_iterations: 0,
+            total_stranded_iterations: 0,
+            mean_stranded_per_iteration: 0.0,
+            median_stranded_per_iteration: 0.0,
         }
     }
 }
@@ -424,6 +438,31 @@ impl StrandedNodeCollection {
                 error!("Stake for pubkey {:?} not found", pubkey);
             }
         }
+        self.total_stranded_iterations += 1;
+    }
+
+    pub fn calculate_stats(
+        &mut self,
+    ) {
+        let mut stranded_counts: Vec<u64> = Vec::new();
+
+        for (_, (_, times_stranded)) in self.stranded_nodes.iter() {
+            self.total_stranded_iterations += times_stranded;
+            stranded_counts.push(*times_stranded);
+        }
+
+        self.mean_stranded_per_iteration = self.total_stranded_iterations as f64 / self.total_iterations as f64;
+
+        stranded_counts.sort();
+
+        self.median_stranded_per_iteration = if stranded_counts.is_empty() {
+            0.0
+        } else if stranded_counts.len() % 2 == 0 {
+            let mid = stranded_counts.len() / 2;
+            (stranded_counts[mid - 1] + stranded_counts[mid]) as f64 / 2.0
+        } else {
+            stranded_counts[stranded_counts.len() / 2] as f64
+        };
     }
 
     pub fn insert_nodes(
@@ -434,6 +473,8 @@ impl StrandedNodeCollection {
         for pubkey in stranded_nodes.iter() {
             self.increment_stranded_count(pubkey, stakes);
         }
+        // we only call this method once per gossip iteration
+        self.total_iterations += 1;
     }
 
     pub fn get_stranded(
@@ -446,6 +487,24 @@ impl StrandedNodeCollection {
         &self,
     ) -> usize {
         self.stranded_nodes.len()
+    }
+
+    pub fn get_total_stranded_iterations(
+        &self,
+    ) -> u64 {
+        self.total_stranded_iterations
+    }
+
+    pub fn get_mean_stranded_per_iteration(
+        &self,
+    ) -> f64 {
+        self.mean_stranded_per_iteration
+    }
+
+    pub fn get_median_stranded_per_iteration(
+        &self,
+    ) -> f64 {
+        self.median_stranded_per_iteration
     }
 
 
@@ -504,9 +563,9 @@ impl GossipStats {
         info!("|---------------------------------|");     
         self.hops_stats.aggregate_hop_stats();
         let stats = self.hops_stats.get_aggregate_hop_stats();
-        info!("Aggregate Hops Mean: {}", stats.mean);
-        info!("Aggregate Hops Median: {}", stats.median);
-        info!("Aggregate Hops Max: {}", stats.max);
+        info!("Aggregate Hops {}", stats.mean);
+        info!("Aggregate Hops {}", stats.median);
+        info!("Aggregate Hops {}", stats.max);
 
     }
 
@@ -590,6 +649,17 @@ impl GossipStats {
                 info!("{:?},\t{},\t{}", node, stake, count);
             }
         }
+    }
+
+    pub fn print_stranded_stats(
+        &self,
+    ) {
+        info!("|-----------------------------|");
+        info!("|---- STRANDED NODE STATS ----|");
+        info!("|-----------------------------|"); 
+        info!("Total stranded node iterations -> SUM(stranded_node_iterations): {}", self.stranded_nodes.get_total_stranded_iterations());
+        info!("Mean stranded nodes per iteration: {}", self.stranded_nodes.get_mean_stranded_per_iteration());
+        info!("Median stranded nodes per iteration :{}", self.stranded_nodes.get_median_stranded_per_iteration());
     }
 
     pub fn print_all(
