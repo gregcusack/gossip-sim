@@ -239,15 +239,6 @@ impl CoverageStatsCollection {
         &self,
     ) {
         info!("Number of iterations: {}", self.coverages.len());
-        // let formatted: String = self.coverages
-        //     .iter()
-        //     .map(|&f| format!("{:.6}", f))
-        //     .collect::<Vec<String>>()
-        //     .join("\n");
-
-        // let output = format!("Coverages:\n{}", formatted);
-        // info!("{}", output);
-
         info!("Coverage {}", self.mean);
         info!("Coverage {}", self.median);
         info!("Coverage {}", self.max);
@@ -376,15 +367,6 @@ impl RelativeMessageRedundancyCollection {
         &self,
     ) {
         info!("Number of iterations: {}", self.rmrs.len());
-        // let formatted: String = self.rmrs
-        //     .iter()
-        //     .map(|&f| format!("{:.6}", f))
-        //     .collect::<Vec<String>>()
-        //     .join("\n");
-
-        // let output = format!("RMRs:\n{}", formatted);
-        // info!("{}", output);
-
         info!("RMR {}", self.mean);
         info!("RMR {}", self.median);
         info!("RMR {}", self.max);
@@ -421,10 +403,6 @@ pub struct StrandedNodeCollection {
     stranded_node_median_stake: f64,
     stranded_node_max_stake: u64,
     stranded_node_min_stake: u64,
-
-    // // most frequently stranded node
-    // most_frequently_stranded_node: (Pubkey, u64, u64),
-    
 }
 
 impl Default for StrandedNodeCollection {
