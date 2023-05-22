@@ -235,6 +235,30 @@ impl CoverageStatsCollection {
         self.min = Stats::Min(min);
     }
 
+    pub fn get_mean(
+        &self,
+    ) -> &Stats {
+        &self.mean
+    }
+
+    pub fn get_median(
+        &self,
+    ) -> &Stats {
+        &self.median
+    }
+
+    pub fn get_max(
+        &self,
+    ) -> &Stats {
+        &self.max
+    }
+
+    pub fn get_min(
+        &self,
+    ) -> &Stats {
+        &self.min
+    }
+
     pub fn print_stats (
         &self,
     ) {
@@ -462,7 +486,7 @@ impl StrandedNodeCollection {
 
         self.mean_stranded_per_iteration = self.total_stranded_iterations as f64 / self.total_gossip_iterations as f64;
         self.stranded_node_mean_stake = self.total_stranded_stake as f64 / self.stranded_count() as f64;
-        self.mean_standed_iterations_per_stranded_node = self.total_gossip_iterations as f64 / self.stranded_count() as f64;
+        self.mean_standed_iterations_per_stranded_node = self.total_stranded_iterations as f64 / self.stranded_count() as f64;
 
         info!("stranded count, total gossip iters: {}, {}", self.stranded_count(), self.total_gossip_iterations);
 
@@ -668,6 +692,17 @@ impl GossipStats {
         self.coverage_stats.calculate_stats();
     }
 
+    pub fn get_coverage_stats(
+        &self,
+    ) -> (&Stats, &Stats, &Stats, &Stats) {
+        (
+            self.coverage_stats.get_mean(),
+            self.coverage_stats.get_median(),
+            self.coverage_stats.get_max(),
+            self.coverage_stats.get_min(),
+        )
+    }
+
     pub fn print_coverage_stats(
         &self,
     ) {
@@ -767,5 +802,138 @@ impl GossipStats {
         // self.print_hops_stats();
     }
 
+
+
 }
 
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+    use {
+        super::*,
+        rand::SeedableRng, rand_chacha::ChaChaRng, std::iter::repeat_with,
+        rand::Rng,
+        solana_sdk::{pubkey::Pubkey},
+        std::{
+            collections::{HashMap},
+        },
+        solana_sdk::native_token::LAMPORTS_PER_SOL,
+    };
+
+    pub fn calc_coverage(
+        stakes: &HashMap<Pubkey, u64>,
+        distances: &HashMap<Pubkey, u64>,
+    ) -> f64 {
+        let num_visited = distances
+            .values()
+            .filter(|&value| *value != u64::MAX)
+            .count();
+
+        num_visited as f64 / stakes.len() as f64
+    }
+
+    #[test]
+    fn test_coverage() {
+        let nodes: Vec<_> = repeat_with(Pubkey::new_unique).take(9).collect();
+        const MAX_STAKE: u64 = (1 << 20) * LAMPORTS_PER_SOL;
+        let mut rng = ChaChaRng::from_seed([189u8; 32]);
+        let pubkey = Pubkey::new_unique();
+        let stakes = repeat_with(|| rng.gen_range(1, MAX_STAKE));
+        let mut stakes: HashMap<_, _> = nodes.iter().copied().zip(stakes).collect();
+        stakes.insert(pubkey, rng.gen_range(1, MAX_STAKE));
+
+        println!("stakes len: {}", stakes.len());
+
+        for (key, stake) in stakes.iter() {
+            println!("{:?}, {}", key, stake);
+        }
+        let mut gossip_stats = GossipStats::default();
+
+        let mut distances: HashMap<Pubkey, u64> = HashMap::default();
+
+        // stranded
+        distances.insert(Pubkey::from_str("11111113pNDtm61yGF8j2ycAwLEPsuWQXobye5qDR").unwrap(), u64::MAX);
+        distances.insert(Pubkey::from_str("11111114DhpssPJgSi1YU7hCMfYt1BJ334YgsffXm").unwrap(), u64::MAX);
+        distances.insert(Pubkey::from_str("11111114d3RrygbPdAtMuFnDmzsN8T5fYKVQ7FVr7").unwrap(), u64::MAX);
+        distances.insert(Pubkey::from_str("111111152P2r5yt6odmBLPsFCLBrFisJ3aS7LqLAT").unwrap(), u64::MAX);
+
+
+        // connected
+        distances.insert(Pubkey::from_str("11111113R2cuenjG5nFubqX9Wzuukdin2YfGQVzu5").unwrap(), 0);
+        distances.insert(Pubkey::from_str("11111112D1oxKts8YPdTJRG5FzxTNpMtWmq8hkVx3").unwrap(), 1);
+        distances.insert(Pubkey::from_str("111111131h1vYVSYuKP6AhS86fbRdMw9XHiZAvAaj").unwrap(), 1);
+        distances.insert(Pubkey::from_str("1111111QLbz7JHiBTspS962RLKV8GndWFwiEaqKM").unwrap(), 2);
+        distances.insert(Pubkey::from_str("11111112cMQwSC9qirWGjZM6gLGwW69X22mqwLLGP").unwrap(), 2);
+        distances.insert(Pubkey::from_str("1111111ogCyDbaRMvkdsHB3qfdyFYaG1WtRUAfdh").unwrap(), 3);
+
+        let coverage: f64 = calc_coverage(&stakes, &distances);
+        assert_eq!(coverage, 6.0/10.0 as f64);
+
+        gossip_stats.insert_coverage(coverage);
+        gossip_stats.calculate_coverage_stats();
+        let coverage_stats = gossip_stats.get_coverage_stats();
+        assert_eq!(coverage_stats.0, &Stats::Mean(6.0/10.0 as f64));
+        assert_eq!(coverage_stats.1, &Stats::Median(6.0/10.0 as f64));
+        assert_eq!(coverage_stats.2, &Stats::Max(6.0/10.0 as f64));
+        assert_eq!(coverage_stats.3, &Stats::Min(6.0/10.0 as f64));
+
+        distances.clear();
+
+        // stranded
+        distances.insert(Pubkey::from_str("11111113pNDtm61yGF8j2ycAwLEPsuWQXobye5qDR").unwrap(), u64::MAX);
+        distances.insert(Pubkey::from_str("111111152P2r5yt6odmBLPsFCLBrFisJ3aS7LqLAT").unwrap(), u64::MAX);
+        distances.insert(Pubkey::from_str("11111112cMQwSC9qirWGjZM6gLGwW69X22mqwLLGP").unwrap(), u64::MAX);
+        distances.insert(Pubkey::from_str("1111111ogCyDbaRMvkdsHB3qfdyFYaG1WtRUAfdh").unwrap(), u64::MAX);
+        distances.insert(Pubkey::from_str("11111114d3RrygbPdAtMuFnDmzsN8T5fYKVQ7FVr7").unwrap(), u64::MAX);
+        distances.insert(Pubkey::from_str("11111114DhpssPJgSi1YU7hCMfYt1BJ334YgsffXm").unwrap(), u64::MAX);
+
+        // connected
+        distances.insert(Pubkey::from_str("11111113R2cuenjG5nFubqX9Wzuukdin2YfGQVzu5").unwrap(), 0);
+        distances.insert(Pubkey::from_str("11111112D1oxKts8YPdTJRG5FzxTNpMtWmq8hkVx3").unwrap(), 1);
+        distances.insert(Pubkey::from_str("111111131h1vYVSYuKP6AhS86fbRdMw9XHiZAvAaj").unwrap(), 1);
+        distances.insert(Pubkey::from_str("1111111QLbz7JHiBTspS962RLKV8GndWFwiEaqKM").unwrap(), 2);
+
+
+
+        let coverage: f64 = calc_coverage(&stakes, &distances);
+        assert_eq!(coverage, 4.0/10.0 as f64);
+
+        gossip_stats.insert_coverage(coverage);
+        gossip_stats.calculate_coverage_stats();
+        let coverage_stats = gossip_stats.get_coverage_stats();
+        assert_eq!(coverage_stats.0, &Stats::Mean(5.0/10.0 as f64));
+        assert_eq!(coverage_stats.1, &Stats::Median(5.0/10.0 as f64));
+        assert_eq!(coverage_stats.2, &Stats::Max(6.0/10.0 as f64));
+        assert_eq!(coverage_stats.3, &Stats::Min(4.0/10.0 as f64));
+
+        distances.clear();
+
+        // stranded
+        distances.insert(Pubkey::from_str("11111113pNDtm61yGF8j2ycAwLEPsuWQXobye5qDR").unwrap(), u64::MAX);
+        distances.insert(Pubkey::from_str("111111152P2r5yt6odmBLPsFCLBrFisJ3aS7LqLAT").unwrap(), u64::MAX);
+        distances.insert(Pubkey::from_str("11111112cMQwSC9qirWGjZM6gLGwW69X22mqwLLGP").unwrap(), u64::MAX);
+        distances.insert(Pubkey::from_str("1111111ogCyDbaRMvkdsHB3qfdyFYaG1WtRUAfdh").unwrap(), u64::MAX);
+        distances.insert(Pubkey::from_str("11111114d3RrygbPdAtMuFnDmzsN8T5fYKVQ7FVr7").unwrap(), u64::MAX);
+        distances.insert(Pubkey::from_str("11111114DhpssPJgSi1YU7hCMfYt1BJ334YgsffXm").unwrap(), u64::MAX);
+        distances.insert(Pubkey::from_str("111111131h1vYVSYuKP6AhS86fbRdMw9XHiZAvAaj").unwrap(), u64::MAX);
+        distances.insert(Pubkey::from_str("1111111QLbz7JHiBTspS962RLKV8GndWFwiEaqKM").unwrap(), u64::MAX);
+
+        // connected
+        distances.insert(Pubkey::from_str("11111113R2cuenjG5nFubqX9Wzuukdin2YfGQVzu5").unwrap(), 0);
+        distances.insert(Pubkey::from_str("11111112D1oxKts8YPdTJRG5FzxTNpMtWmq8hkVx3").unwrap(), 1);
+
+        let coverage: f64 = calc_coverage(&stakes, &distances);
+        assert_eq!(coverage, 2.0/10.0 as f64);
+
+        gossip_stats.insert_coverage(coverage);
+        gossip_stats.calculate_coverage_stats();
+        let coverage_stats = gossip_stats.get_coverage_stats();
+        assert_eq!(coverage_stats.0, &Stats::Mean(0.4000000000000001 as f64));
+        assert_eq!(coverage_stats.1, &Stats::Median(4.0/10.0 as f64));
+        assert_eq!(coverage_stats.2, &Stats::Max(6.0/10.0 as f64));
+        assert_eq!(coverage_stats.3, &Stats::Min(2.0/10.0 as f64));
+
+    }
+
+}

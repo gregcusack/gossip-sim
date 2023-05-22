@@ -37,7 +37,7 @@ pub enum RouterError {
     SendError,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum HopsStats {
     Mean(f64),
     Median(f64),
@@ -45,7 +45,7 @@ pub enum HopsStats {
     Min(u64),
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum Stats {
     Mean(f64),
     Median(f64),
