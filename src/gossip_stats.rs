@@ -394,6 +394,33 @@ impl RelativeMessageRedundancyCollection {
 
 pub struct StrandedNodeCollection {
     stranded_nodes: HashMap<Pubkey, (/* stake */u64, /* times stranded */ u64)>, 
+    /*
+    mean stranded nodes per iteration
+    median stranded nodes per iteration
+    histogram -> # of nodes stranded for n iterations
+    total number of stranded node iterations -> number of nodes: 15,000 total iterations stranded.
+     */
+    total_gossip_iterations: u64,
+    total_stranded_iterations: u64, // sum(times_stranded)
+    mean_stranded_per_iteration: f64, // sum(times_stranded) / iterations
+
+    // across just the stranded nodes, what is the mean number of iterations
+    mean_standed_iterations_per_stranded_node: f64, // mean # of iterations a stranded node was stranded for
+
+    // across just the stranded nodes, what is the median number of iterations you will be stranded for
+    median_standed_iterations_per_stranded_node: f64, // median(times_stranded)
+
+    // across all nodes in the network. the average amount of iterations a node was stranded for
+    stranded_iterations_per_node: f64,  // total_stranded_iterations / # of nodes in network
+
+    total_nodes: usize, // for stranded_iterations_per_node
+
+    // Info about the stake of stranded nodes
+    total_stranded_stake: u64,
+    stranded_node_mean_stake: f64,
+    stranded_node_median_stake: f64,
+    stranded_node_max_stake: u64,
+    stranded_node_min_stake: u64,
     
 }
 
@@ -401,6 +428,18 @@ impl Default for StrandedNodeCollection {
     fn default() -> Self {
         Self {
             stranded_nodes: HashMap::default(),
+            total_gossip_iterations: 0,
+            total_stranded_iterations: 0,
+            mean_stranded_per_iteration: 0.0,
+            mean_standed_iterations_per_stranded_node: 0.0,
+            median_standed_iterations_per_stranded_node: 0.0,
+            stranded_iterations_per_node: 0.0,
+            total_nodes: 0,
+            total_stranded_stake: 0,
+            stranded_node_mean_stake: 0.0,
+            stranded_node_median_stake: 0.0,
+            stranded_node_max_stake: 0,
+            stranded_node_min_stake: 0,        
         }
     }
 }
@@ -426,6 +465,60 @@ impl StrandedNodeCollection {
         }
     }
 
+    pub fn calculate_stats(
+        &mut self,
+    ) {
+        let mut stranded_iteration_counts: Vec<u64> = Vec::new();
+        let mut stranded_stakes: Vec<u64> = Vec::new();
+
+        for (_, (stake, times_stranded)) in self.stranded_nodes.iter() {
+            self.total_stranded_iterations += times_stranded;
+            stranded_iteration_counts.push(*times_stranded);
+
+            self.total_stranded_stake += stake;
+            stranded_stakes.push(*stake);
+        }
+
+        self.mean_stranded_per_iteration = self.total_stranded_iterations as f64 / self.total_gossip_iterations as f64;
+        self.stranded_node_mean_stake = self.total_stranded_stake as f64 / self.stranded_count() as f64;
+        self.mean_standed_iterations_per_stranded_node = self.total_gossip_iterations as f64 / self.stranded_count() as f64;
+
+        info!("stranded count, total gossip iters: {}, {}", self.stranded_count(), self.total_gossip_iterations);
+
+        stranded_iteration_counts.sort();
+        stranded_stakes.sort();
+
+        self.median_standed_iterations_per_stranded_node = if stranded_iteration_counts.is_empty() {
+            0.0
+        } else if stranded_iteration_counts.len() % 2 == 0 {
+            let mid = stranded_iteration_counts.len() / 2;
+            (stranded_iteration_counts[mid - 1] + stranded_iteration_counts[mid]) as f64 / 2.0
+        } else {
+            stranded_iteration_counts[stranded_iteration_counts.len() / 2] as f64
+        };
+
+
+        // info!("stranded iter, total nodes: {}, {}", self.total_stranded_iterations, self.total_nodes);
+        self.stranded_iterations_per_node = self.total_stranded_iterations as f64 / self.total_nodes as f64;
+
+        self.stranded_node_median_stake = if stranded_stakes.is_empty() {
+            0.0
+        } else if stranded_stakes.len() % 2 == 0 {
+            let mid = stranded_stakes.len() / 2;
+            (stranded_stakes[mid - 1] + stranded_stakes[mid]) as f64 / 2.0
+        } else {
+            stranded_stakes[stranded_stakes.len() / 2] as f64
+        };
+
+        self.stranded_node_max_stake = *stranded_stakes
+            .last()
+            .unwrap_or(&0);
+        self.stranded_node_min_stake = *stranded_stakes
+            .first()
+            .unwrap_or(&0);
+
+    }
+
     pub fn insert_nodes(
         &mut self,
         stranded_nodes: Vec<Pubkey>,
@@ -434,6 +527,18 @@ impl StrandedNodeCollection {
         for pubkey in stranded_nodes.iter() {
             self.increment_stranded_count(pubkey, stakes);
         }
+        // we only call this method once per gossip iteration
+        self.total_gossip_iterations += 1;
+        // set for stranded_iterations_per_node calculation later
+        if self.total_nodes == 0 {
+            self.total_nodes = stakes.len();
+        }
+    }
+
+    pub fn get_stranded_iterations_per_node(
+        &mut self,
+    ) -> f64 {
+        self.stranded_iterations_per_node
     }
 
     pub fn get_stranded(
@@ -446,6 +551,41 @@ impl StrandedNodeCollection {
         &self,
     ) -> usize {
         self.stranded_nodes.len()
+    }
+
+    pub fn get_total_stranded_iterations(
+        &self,
+    ) -> u64 {
+        self.total_stranded_iterations
+    }
+
+    pub fn get_mean_stranded_per_iteration(
+        &self,
+    ) -> f64 {
+        self.mean_stranded_per_iteration
+    }
+
+    pub fn get_median_standed_iterations_per_stranded_node(
+        &self,
+    ) -> f64 {
+        self.median_standed_iterations_per_stranded_node
+    }
+
+    pub fn get_mean_standed_iterations_per_stranded_node(
+        &self,
+    ) -> f64 {
+        self.mean_standed_iterations_per_stranded_node
+    }
+
+    pub fn get_stranded_stake_stats(
+        &self,
+    ) -> (f64, f64, u64, u64) {
+        (
+            self.stranded_node_mean_stake, 
+            self.stranded_node_median_stake, 
+            self.stranded_node_max_stake, 
+            self.stranded_node_min_stake
+        )
     }
 
 
@@ -504,9 +644,9 @@ impl GossipStats {
         info!("|---------------------------------|");     
         self.hops_stats.aggregate_hop_stats();
         let stats = self.hops_stats.get_aggregate_hop_stats();
-        info!("Aggregate Hops Mean: {}", stats.mean);
-        info!("Aggregate Hops Median: {}", stats.median);
-        info!("Aggregate Hops Max: {}", stats.max);
+        info!("Aggregate Hops {}", stats.mean);
+        info!("Aggregate Hops {}", stats.median);
+        info!("Aggregate Hops {}", stats.max);
 
     }
 
@@ -592,8 +732,38 @@ impl GossipStats {
         }
     }
 
+    pub fn print_stranded_stats(
+        &mut self,
+    ) {
+        info!("|-----------------------------|");
+        info!("|---- STRANDED NODE STATS ----|");
+        info!("|-----------------------------|"); 
+        self.stranded_nodes.calculate_stats();
+        info!("Total stranded node iterations -> SUM(stranded_node_iterations): {}", self.stranded_nodes.get_total_stranded_iterations());
+        // total_stranded_iterations / all gossip nodes
+        // on average how many iterations was a gossip node stranded across our test
+        // may not be great stat since median is likely to be 0 every time
+        info!("Mean number of iterations a gossip node was stranded for: {:.6}", self.stranded_nodes.get_stranded_iterations_per_node());
+        
+        // avg number of nodes stranded during each gossip iteration
+        info!("Mean number of nodes stranded during each gossip iteration: {:.6}", self.stranded_nodes.get_mean_stranded_per_iteration());
+        
+        // avg number of iterations a stranded node was stranded for 
+        info!("Mean number of iterations a stranded node was stranded for: {:.6}", self.stranded_nodes.get_mean_standed_iterations_per_stranded_node());
+        
+        // median number of iterations a stranded node was stranded for  
+        info!("Median number of iterations a stranded node was stranded for: {}", self.stranded_nodes.get_median_standed_iterations_per_stranded_node());
+
+        let stake_stats = self.stranded_nodes.get_stranded_stake_stats();
+        info!("Mean stake: {:.2}", stake_stats.0);
+        info!("Median stake: {}", stake_stats.1);
+        info!("Max stake: {}", stake_stats.2);
+        info!("Min stake: {}", stake_stats.3);
+    }
+
     pub fn print_all(
         &mut self,
+
     ) {
         self.calculate_coverage_stats();
         self.print_coverage_stats();
@@ -601,6 +771,7 @@ impl GossipStats {
         self.print_rmr_stats();
         self.print_aggregate_hop_stats();
         self.print_last_delivery_hop_stats();
+        self.print_stranded_stats();
         self.print_stranded();
         // self.print_hops_stats();
     }
