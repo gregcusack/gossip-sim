@@ -421,6 +421,9 @@ pub struct StrandedNodeCollection {
     stranded_node_median_stake: f64,
     stranded_node_max_stake: u64,
     stranded_node_min_stake: u64,
+
+    // // most frequently stranded node
+    // most_frequently_stranded_node: (Pubkey, u64, u64),
     
 }
 
@@ -541,10 +544,20 @@ impl StrandedNodeCollection {
         self.stranded_iterations_per_node
     }
 
-    pub fn get_stranded(
+    pub fn get_sorted_stranded(
         &self,
-    ) -> &HashMap<Pubkey, (u64, u64)> {
-        &self.stranded_nodes
+    ) -> Vec<(Pubkey, (u64, u64))> {
+        let mut sorted_nodes: Vec<(Pubkey, (u64, u64))> = self.stranded_nodes
+            .clone()
+            .into_iter()
+            .collect();
+        sorted_nodes.sort_by(|(_, (stake1, times_stranded1)), (_, (stake2, times_stranded2))| {
+            match times_stranded1.cmp(times_stranded2).reverse() {
+                std::cmp::Ordering::Equal => stake1.cmp(stake2).reverse(),
+                other => other,
+            }
+        });
+        sorted_nodes
     }
 
     pub fn stranded_count(
@@ -723,7 +736,7 @@ impl GossipStats {
         info!("|---- STRANDED NODES (Pubkey, stake, # times stranded) ----|");
         info!("|----------------------------------------------------------|"); 
         info!("Total stranded nodes: {}", self.stranded_nodes.stranded_count());
-        for (node, (stake, count)) in self.stranded_nodes.get_stranded().iter() {
+        for (node, (stake, count)) in self.stranded_nodes.get_sorted_stranded().iter() {
             if stake == &0 {
                 info!("{:?},\t{},\t\t{}", node, stake, count);
             } else {
