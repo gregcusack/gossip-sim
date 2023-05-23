@@ -393,14 +393,49 @@ impl RelativeMessageRedundancyCollection {
         self.min = Stats::Min(min);
     }
 
+    pub fn get_rmr_by_index(
+        &self,
+        index: usize,
+    ) -> &f64 {
+        &self.rmrs[index]
+    }
+
+    pub fn mean(&self) -> f64 {
+        match &self.mean {
+            Stats::Mean(val) => *val,
+            _ => panic!("Unexpected value in mean field"),
+        }
+    }
+
+    pub fn max(&self) -> f64 {
+        match &self.max {
+            Stats::Max(val) => *val,
+            _ => panic!("Unexpected value in max field"),
+        }
+    }
+
+    pub fn min(&self) -> f64 {
+        match &self.min {
+            Stats::Min(val) => *val,
+            _ => panic!("Unexpected value in min field"),
+        }
+    }
+
+    pub fn median(&self) -> f64 {
+        match &self.median {
+            Stats::Median(val) => *val,
+            _ => panic!("Unexpected value in median field"),
+        }
+    }
+
     pub fn print_stats (
         &self,
     ) {
         info!("Number of iterations: {}", self.rmrs.len());
-        info!("RMR {}", self.mean);
-        info!("RMR {}", self.median);
-        info!("RMR {}", self.max);
-        info!("RMR {}", self.min);
+        println!("RMR {}", self.mean);
+        println!("RMR {}", self.median);
+        println!("RMR {}", self.max);
+        println!("RMR {}", self.min);
     }
 }
 
@@ -768,6 +803,24 @@ impl GossipStats {
         self.relative_message_redundancy_stats.calculate_stats();
     }
 
+    pub fn get_rmr_by_index(
+        &self,
+        index: usize,
+    ) -> &f64 {
+        self.relative_message_redundancy_stats.get_rmr_by_index(index)
+    }
+
+    pub fn get_rmr_stats(
+        &self,
+    ) -> (f64, f64, f64, f64) {
+        (
+            self.relative_message_redundancy_stats.mean(),
+            self.relative_message_redundancy_stats.median(),
+            self.relative_message_redundancy_stats.max(),
+            self.relative_message_redundancy_stats.min(),
+        )
+    }
+
     pub fn print_rmr_stats(
         &self,
     ) {
@@ -854,7 +907,7 @@ impl GossipStats {
 mod tests {
     use std::str::FromStr;
 
-    use crate::gossip::Cluster;
+    use crate::gossip::{Cluster, make_gossip_cluster_for_tests, Node};
 
     use {
         super::*,
@@ -865,6 +918,11 @@ mod tests {
             collections::{HashMap},
         },
         solana_sdk::native_token::LAMPORTS_PER_SOL,
+        // gossip_sim::gossip::{
+        //     Node,
+        //     Cluster,
+        //     make_gossip_cluster_for_tests,
+        // },
     };
 
     pub fn calc_coverage(
@@ -879,9 +937,24 @@ mod tests {
         num_visited as f64 / stakes.len() as f64
     }
 
+    pub fn run_gossip(
+        rng: &mut ChaChaRng,
+        nodes: &mut Vec<Node>,
+        stakes: &HashMap<Pubkey, /*stake:*/ u64>,
+        active_set_size: usize,
+    ) {
+        for node in nodes {
+            node.run_gossip(rng, stakes, active_set_size, true);
+        }
+    }
+
     #[test]
     fn test_rmr() {
-        let nodes: Vec<_> = repeat_with(Pubkey::new_unique).take(9).collect();
+        const PUSH_FANOUT: usize = 2;
+        const ACTIVE_SET_SIZE: usize = 12;
+        const GOSSIP_ITERATIONS: usize = 2;
+
+        let nodes: Vec<_> = repeat_with(Pubkey::new_unique).take(5).collect();
         const MAX_STAKE: u64 = (1 << 20) * LAMPORTS_PER_SOL;
         let mut rng = ChaChaRng::from_seed([189u8; 32]);
         let pubkey = Pubkey::new_unique();
@@ -895,9 +968,55 @@ mod tests {
             println!("{:?}, {}", key, stake);
         }
         let mut gossip_stats = GossipStats::default();
+        let mut cluster = Cluster::new(PUSH_FANOUT);
+        let origin_pubkey = &pubkey; //just a temp origin selection
 
-        let mut distances: HashMap<Pubkey, u64> = HashMap::default();
-        let mut cluster = Cluster::new(2);
+
+        let res = make_gossip_cluster_for_tests(&stakes)
+        .unwrap();
+
+        let (mut nodes, _): (Vec<_>, Vec<_>) = res
+            .into_iter()
+            .map(|(node, sender)| {
+                let pubkey = node.pubkey();
+                (node, (pubkey, sender))
+            })
+            .unzip();
+
+        // sort to maintain order across tests
+        nodes.sort_by_key(|node| node.pubkey() );
+
+        // setup gossip
+        run_gossip(&mut rng, &mut nodes, &stakes, ACTIVE_SET_SIZE);
+
+        for i in 0..GOSSIP_ITERATIONS {
+            {
+                let node_map: HashMap<Pubkey, &Node> = nodes
+                    .iter()
+                    .map(|node| (node.pubkey(), node))
+                    .collect();
+                cluster.new_mst(origin_pubkey, &stakes, &node_map);
+            }
+
+            match cluster.relative_message_redundancy() {
+                Ok(result) => {
+                    gossip_stats.insert_rmr(result);
+                },
+                Err(_) => error!("Network RMR error. # of nodes is 1."),
+            }
+
+        }
+
+        assert_eq!(gossip_stats.get_rmr_by_index(0), &2.8);
+
+        gossip_stats.calculate_rmr_stats();
+        gossip_stats.print_rmr_stats();
+        let rmr_stats = gossip_stats.get_rmr_stats();
+        assert_eq!(rmr_stats.0, 2.8); //mean
+        assert_eq!(rmr_stats.1, 2.8); //median
+        assert_eq!(rmr_stats.2, 2.8); //max
+        assert_eq!(rmr_stats.3, 2.8); //min
+
 
     }
 
