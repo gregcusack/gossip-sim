@@ -854,6 +854,8 @@ impl GossipStats {
 mod tests {
     use std::str::FromStr;
 
+    use crate::gossip::Cluster;
+
     use {
         super::*,
         rand::SeedableRng, rand_chacha::ChaChaRng, std::iter::repeat_with,
@@ -875,6 +877,28 @@ mod tests {
             .count();
 
         num_visited as f64 / stakes.len() as f64
+    }
+
+    #[test]
+    fn test_rmr() {
+        let nodes: Vec<_> = repeat_with(Pubkey::new_unique).take(9).collect();
+        const MAX_STAKE: u64 = (1 << 20) * LAMPORTS_PER_SOL;
+        let mut rng = ChaChaRng::from_seed([189u8; 32]);
+        let pubkey = Pubkey::new_unique();
+        let stakes = repeat_with(|| rng.gen_range(1, MAX_STAKE));
+        let mut stakes: HashMap<_, _> = nodes.iter().copied().zip(stakes).collect();
+        stakes.insert(pubkey, rng.gen_range(1, MAX_STAKE));
+
+        println!("stakes len: {}", stakes.len());
+
+        for (key, stake) in stakes.iter() {
+            println!("{:?}, {}", key, stake);
+        }
+        let mut gossip_stats = GossipStats::default();
+
+        let mut distances: HashMap<Pubkey, u64> = HashMap::default();
+        let mut cluster = Cluster::new(2);
+
     }
 
     #[test]
