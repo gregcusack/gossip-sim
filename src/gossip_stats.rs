@@ -1,9 +1,7 @@
-use solana_sdk::stake;
-
 use {
     crate::{Stats, HopsStats},
     log::{info, error},
-    std::collections::HashMap,
+    std::collections::{HashMap, BTreeMap},
     solana_sdk::pubkey::Pubkey,
 };
 
@@ -467,6 +465,10 @@ pub struct StrandedNodeCollection {
     stranded_node_median_stake: f64,
     stranded_node_max_stake: u64,
     stranded_node_min_stake: u64,
+
+    // histogram. buckets are stranded count.
+    // amount in bucket is the number of nodes that were stranded that many times
+    histogram: BTreeMap<u64, u64>,
 }
 
 impl Default for StrandedNodeCollection {
@@ -484,7 +486,8 @@ impl Default for StrandedNodeCollection {
             stranded_node_mean_stake: 0.0,
             stranded_node_median_stake: 0.0,
             stranded_node_max_stake: 0,
-            stranded_node_min_stake: 0,        
+            stranded_node_min_stake: 0,       
+            histogram: BTreeMap::default(), 
         }
     }
 }
@@ -530,7 +533,7 @@ impl StrandedNodeCollection {
         self.stranded_node_mean_stake = self.total_stranded_stake as f64 / self.stranded_count() as f64;
         self.mean_standed_iterations_per_stranded_node = self.total_stranded_iterations as f64 / self.stranded_count() as f64;
 
-        info!("stranded count, total gossip iters: {}, {}", self.stranded_count(), self.total_gossip_iterations);
+        // info!("stranded count, total gossip iters: {}, {}", self.stranded_count(), self.total_gossip_iterations);
 
         stranded_iteration_counts.sort();
         stranded_stakes.sort();
@@ -643,6 +646,37 @@ impl StrandedNodeCollection {
             self.stranded_node_min_stake
         )
     }
+
+    //TODO: turn this into its own object that is held by the stranded stats collection
+    pub fn build_historgram(
+        &mut self,
+        num_buckets: u64,
+    ) {        
+        // Determine the range of each bucket
+        let min_stranded = self.stranded_nodes.iter().map(|(_, (_, times_stranded))| *times_stranded).min().unwrap_or(0);
+        let max_stranded = self.stranded_nodes.iter().map(|(_, (_, times_stranded))| *times_stranded).max().unwrap_or(0);
+        let bucket_range = (max_stranded - min_stranded + num_buckets - 1) / num_buckets;
+        
+        // Iterate over the stranded_nodes entries
+        for (_, times_stranded) in self.stranded_nodes.values() {
+            // Determine the bucket index based on the times_stranded value
+            let bucket = (*times_stranded - min_stranded) / bucket_range;
+            
+            // Increment the count for the bucket in the histogram
+            *self.histogram.entry(bucket).or_insert(0) += 1;
+        }
+
+        info!("|---------------------------------|");
+        info!("|---- HISTOGRAM W/ {} BUCKETS ----|", num_buckets);
+        info!("|---------------------------------|"); 
+        // Print the histogram sorted by bucket index
+        for (bucket, count) in &self.histogram {
+            let bucket_min = min_stranded + bucket * bucket_range;
+            let bucket_max = min_stranded + (bucket + 1) * bucket_range - 1;
+            info!("Bucket: {}-{}: Count: {}", bucket_min, bucket_max, count);
+        }
+    }
+
 }
 
 pub struct GossipStats {
@@ -929,9 +963,16 @@ impl GossipStats {
         info!("Min stake: {}", stake_stats.3);
     }
 
+    pub fn build_stranded_node_histogram(
+        &mut self,
+        num_buckets: u64,
+    ) {
+        self.stranded_nodes.build_historgram(num_buckets);
+    }
+
     pub fn print_all(
         &mut self,
-
+        num_buckets: u64
     ) {
         self.calculate_coverage_stats();
         self.print_coverage_stats();
@@ -948,6 +989,7 @@ impl GossipStats {
         self.calculate_stranded_stats();
         self.print_stranded_stats();
 
+        self.build_stranded_node_histogram(num_buckets);
         self.print_stranded();
         // self.print_hops_stats();
     }

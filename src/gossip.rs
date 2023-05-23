@@ -36,6 +36,7 @@ pub struct Config<'a> {
     pub prune_stake_threshold: f64,
     pub min_ingress_nodes: usize,
     pub filter_zero_staked_nodes: bool,
+    pub num_buckets_for_stranded_node_hist: u64,
 }
 
 pub struct Cluster {

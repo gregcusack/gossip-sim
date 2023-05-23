@@ -126,6 +126,13 @@ fn parse_matches() -> ArgMatches {
                 })
                 .help("Ensure a node is connected to a minimum stake of prune_stake_threshold*node.stake()"),
         )
+        .arg(
+            Arg::with_name("num_buckets_for_stranded_node_hist")
+                .long("num-buckets")
+                .takes_value(true)
+                .default_value("10")
+                .help("Number of buckets for the stranded node histogram. see gossip_stats.rs"),
+        )
         .get_matches()
 }
 
@@ -177,6 +184,7 @@ fn main() {
         prune_stake_threshold: value_t_or_exit!(matches, "prune_stake_threshold", f64), 
         min_ingress_nodes: value_t_or_exit!(matches, "min_ingress_nodes", usize),
         filter_zero_staked_nodes: matches.is_present("remove_zero_staked_nodes"),
+        num_buckets_for_stranded_node_hist: value_t_or_exit!(matches, "num_buckets_for_stranded_node_hist", u64),
     };
 
     // check if we want to write keys and stakes to a file
@@ -313,7 +321,7 @@ fn main() {
         cluster.chance_to_rotate(&mut rng, &mut nodes, config.gossip_active_set_size, &stakes, config.probability_of_rotation, &mut StdRng::from_entropy());
     }
 
-    stats.print_all();
+    stats.print_all(config.num_buckets_for_stranded_node_hist);
 
 }
 
