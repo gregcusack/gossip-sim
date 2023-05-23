@@ -918,11 +918,7 @@ mod tests {
             collections::{HashMap},
         },
         solana_sdk::native_token::LAMPORTS_PER_SOL,
-        // gossip_sim::gossip::{
-        //     Node,
-        //     Cluster,
-        //     make_gossip_cluster_for_tests,
-        // },
+        rand::rngs::StdRng,
     };
 
     pub fn calc_coverage(
@@ -952,7 +948,10 @@ mod tests {
     fn test_rmr() {
         const PUSH_FANOUT: usize = 2;
         const ACTIVE_SET_SIZE: usize = 12;
-        const GOSSIP_ITERATIONS: usize = 2;
+        const PRUNE_STAKE_THRESHOLD: f64 = 0.15;
+        const MIN_INGRESS_NODES: usize = 2;
+        const CHANCE_TO_ROTATE: f64 = 0.2;
+        const GOSSIP_ITERATIONS: usize = 100;
 
         let nodes: Vec<_> = repeat_with(Pubkey::new_unique).take(5).collect();
         const MAX_STAKE: u64 = (1 << 20) * LAMPORTS_PER_SOL;
@@ -1001,21 +1000,41 @@ mod tests {
             match cluster.relative_message_redundancy() {
                 Ok(result) => {
                     gossip_stats.insert_rmr(result);
+                    println!("rmr result: {}", result);
                 },
                 Err(_) => error!("Network RMR error. # of nodes is 1."),
             }
 
+            cluster.consume_messages(origin_pubkey, &mut nodes);
+            cluster.send_prunes(*origin_pubkey, &mut nodes, PRUNE_STAKE_THRESHOLD, MIN_INGRESS_NODES, &stakes);
+
+            {
+                let node_map: HashMap<Pubkey, &Node> = nodes
+                    .iter()
+                    .map(|node| (node.pubkey(), node))
+                    .collect();
+                cluster.prune_connections(&node_map, &stakes);
+            }
+
+            let seed = [42u8; 32];
+            let mut rotate_seed_rng = StdRng::from_seed(seed);
+            let mut rotate_seed_rng_2 = StdRng::from_seed(seed);
+            cluster.chance_to_rotate(&mut rotate_seed_rng_2, &mut nodes, ACTIVE_SET_SIZE, &stakes, CHANCE_TO_ROTATE, &mut rotate_seed_rng);
+        
+            
         }
 
         assert_eq!(gossip_stats.get_rmr_by_index(0), &2.8);
+        assert_eq!(gossip_stats.get_rmr_by_index(95), &2.0);
+
 
         gossip_stats.calculate_rmr_stats();
         gossip_stats.print_rmr_stats();
         let rmr_stats = gossip_stats.get_rmr_stats();
-        assert_eq!(rmr_stats.0, 2.8); //mean
+        assert_eq!(rmr_stats.0, 2.4800000000000044); //mean
         assert_eq!(rmr_stats.1, 2.8); //median
         assert_eq!(rmr_stats.2, 2.8); //max
-        assert_eq!(rmr_stats.3, 2.8); //min
+        assert_eq!(rmr_stats.3, 2.0); //min
 
 
     }
