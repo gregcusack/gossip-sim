@@ -1,3 +1,5 @@
+use solana_sdk::stake;
+
 use {
     crate::{Stats, HopsStats},
     log::{info, error},
@@ -442,10 +444,7 @@ impl RelativeMessageRedundancyCollection {
 pub struct StrandedNodeCollection {
     stranded_nodes: HashMap<Pubkey, (/* stake */u64, /* times stranded */ u64)>, 
     /*
-    mean stranded nodes per iteration
-    median stranded nodes per iteration
-    histogram -> # of nodes stranded for n iterations
-    total number of stranded node iterations -> number of nodes: 15,000 total iterations stranded.
+    TODO: histogram -> # of nodes stranded for n iterations
      */
     total_gossip_iterations: u64,
     total_stranded_iterations: u64, // sum(times_stranded)
@@ -514,6 +513,8 @@ impl StrandedNodeCollection {
     pub fn calculate_stats(
         &mut self,
     ) {
+        self.total_stranded_iterations = 0;
+        self.total_stranded_stake = 0;
         let mut stranded_iteration_counts: Vec<u64> = Vec::new();
         let mut stranded_stakes: Vec<u64> = Vec::new();
 
@@ -543,7 +544,6 @@ impl StrandedNodeCollection {
             stranded_iteration_counts[stranded_iteration_counts.len() / 2] as f64
         };
 
-
         // info!("stranded iter, total nodes: {}, {}", self.total_stranded_iterations, self.total_nodes);
         self.stranded_iterations_per_node = self.total_stranded_iterations as f64 / self.total_nodes as f64;
 
@@ -567,7 +567,7 @@ impl StrandedNodeCollection {
 
     pub fn insert_nodes(
         &mut self,
-        stranded_nodes: Vec<Pubkey>,
+        stranded_nodes: &Vec<Pubkey>,
         stakes: &HashMap<Pubkey, u64>,
     ) {
         for pubkey in stranded_nodes.iter() {
@@ -643,8 +643,6 @@ impl StrandedNodeCollection {
             self.stranded_node_min_stake
         )
     }
-
-
 }
 
 pub struct GossipStats {
@@ -704,13 +702,18 @@ impl GossipStats {
         )
     }
 
+    pub fn calculate_aggregate_hop_stats(
+        &mut self,
+    ) {
+        self.hops_stats.aggregate_hop_stats();
+    }
+
     pub fn print_aggregate_hop_stats(
         &mut self,
     ) {
         info!("|---------------------------------|");
         info!("|------ AGGREGATE HOP STATS ------|");
         info!("|---------------------------------|");     
-        self.hops_stats.aggregate_hop_stats();
         let stats = self.hops_stats.get_aggregate_hop_stats();
         info!("Aggregate Hops {}", stats.mean);
         info!("Aggregate Hops {}", stats.median);
@@ -720,7 +723,6 @@ impl GossipStats {
     pub fn get_aggregate_hop_stats(
         &mut self,
     ) -> (f64, f64, u64, u64) {
-        self.hops_stats.aggregate_hop_stats();
         let stats = self.hops_stats.get_aggregate_hop_stats();
         (
             stats.mean(),
@@ -730,13 +732,18 @@ impl GossipStats {
         )
     }
 
+    pub fn calculate_last_delivery_hop_stats(
+        &mut self,
+    ) {
+        self.hops_stats.calc_last_delivery_hop_stats();
+    }
+
     pub fn print_last_delivery_hop_stats(
         &mut self,
     ) {
         info!("|-------------------------------------|");
         info!("|------ LAST DELIVERY HOP STATS ------|");
         info!("|-------------------------------------|");     
-        self.hops_stats.calc_last_delivery_hop_stats();
         let stats = self.hops_stats.get_last_delivery_hop_stats();
         info!("LDH Mean: {}", stats.mean);
         info!("LDH Median: {}", stats.median);
@@ -832,10 +839,16 @@ impl GossipStats {
 
     pub fn insert_stranded_nodes(
         &mut self,
-        stranded_nodes: Vec<Pubkey>,
+        stranded_nodes: &Vec<Pubkey>,
         stakes: &HashMap<Pubkey, u64>,
     ) {
         self.stranded_nodes.insert_nodes(stranded_nodes, stakes);
+    }
+
+    pub fn get_stranded_nodes(
+        &self,
+    ) -> Vec<(Pubkey, (u64, u64))> {
+        self.stranded_nodes.get_sorted_stranded()
     }
 
     pub fn print_stranded(
@@ -854,13 +867,46 @@ impl GossipStats {
         }
     }
 
+    // must call: calculate_stranded_stats() calling this method
+    pub fn get_stranded_stats(
+        &mut self,
+    ) -> (
+        u64, // total stranded iterations
+        f64, // on average how many iterations was a gossip node stranded across our test
+        f64, // avg number of nodes stranded during each gossip iteration
+        f64, // avg number of iterations a stranded node was stranded for 
+        f64, // median number of iterations a stranded node was stranded for 
+        f64, // mean stake of stranded nodes
+        f64, // median stake of stranded nodes
+        u64, // max stake of stranded nodes
+        u64, // min stake of stranded nodes
+    ) {
+        let stake_stats = self.stranded_nodes.get_stranded_stake_stats();
+        (
+            self.stranded_nodes.get_total_stranded_iterations(),
+            self.stranded_nodes.get_stranded_iterations_per_node(),
+            self.stranded_nodes.get_mean_stranded_per_iteration(),
+            self.stranded_nodes.get_mean_standed_iterations_per_stranded_node(),
+            self.stranded_nodes.get_median_standed_iterations_per_stranded_node(),
+            stake_stats.0, 
+            stake_stats.1, 
+            stake_stats.2, 
+            stake_stats.3, 
+        )
+    }
+
+    pub fn calculate_stranded_stats(
+        &mut self,
+    ) {
+        self.stranded_nodes.calculate_stats();
+    }
+
     pub fn print_stranded_stats(
         &mut self,
     ) {
         info!("|-----------------------------|");
         info!("|---- STRANDED NODE STATS ----|");
         info!("|-----------------------------|"); 
-        self.stranded_nodes.calculate_stats();
         info!("Total stranded node iterations -> SUM(stranded_node_iterations): {}", self.stranded_nodes.get_total_stranded_iterations());
         // total_stranded_iterations / all gossip nodes
         // on average how many iterations was a gossip node stranded across our test
@@ -889,17 +935,22 @@ impl GossipStats {
     ) {
         self.calculate_coverage_stats();
         self.print_coverage_stats();
+
         self.calculate_rmr_stats();
         self.print_rmr_stats();
+
+        self.calculate_aggregate_hop_stats();
         self.print_aggregate_hop_stats();
+
+        self.calculate_last_delivery_hop_stats();
         self.print_last_delivery_hop_stats();
+
+        self.calculate_stranded_stats();
         self.print_stranded_stats();
+
         self.print_stranded();
         // self.print_hops_stats();
     }
-
-
-
 }
 
 
@@ -945,6 +996,69 @@ mod tests {
     }
 
     #[test]
+    fn test_stranded() {
+        let nodes: Vec<_> = repeat_with(Pubkey::new_unique).take(9).collect();
+        const MAX_STAKE: u64 = (1 << 20) * LAMPORTS_PER_SOL;
+        let mut rng = ChaChaRng::from_seed([189u8; 32]);
+        let pubkey = Pubkey::new_unique();
+        let stakes = repeat_with(|| rng.gen_range(1, MAX_STAKE));
+        let mut stakes: HashMap<_, _> = nodes.iter().copied().zip(stakes).collect();
+        stakes.insert(pubkey, rng.gen_range(1, MAX_STAKE));
+
+        for (key, stake) in stakes.iter() {
+            println!("{:?}, {}", key, stake);
+        }
+        let mut gossip_stats = GossipStats::default();
+        let mut stranded_nodes: Vec<Pubkey> = Vec::default();
+
+        // stranded
+        stranded_nodes.push(Pubkey::from_str("11111113pNDtm61yGF8j2ycAwLEPsuWQXobye5qDR").unwrap());
+        stranded_nodes.push(Pubkey::from_str("11111114DhpssPJgSi1YU7hCMfYt1BJ334YgsffXm").unwrap());
+        stranded_nodes.push(Pubkey::from_str("11111114d3RrygbPdAtMuFnDmzsN8T5fYKVQ7FVr7").unwrap());
+        stranded_nodes.push(Pubkey::from_str("111111152P2r5yt6odmBLPsFCLBrFisJ3aS7LqLAT").unwrap());
+
+        gossip_stats.insert_stranded_nodes(&stranded_nodes, &stakes);
+        gossip_stats.calculate_stranded_stats();
+        let stranded_stats = gossip_stats.get_stranded_stats();
+        assert_eq!(stranded_stats.0, 4);
+        assert_eq!(stranded_stats.1, 0.4);
+        assert_eq!(stranded_stats.2, 4.0);
+        assert_eq!(stranded_stats.3, 1.0);
+        assert_eq!(stranded_stats.4, 1.0);
+        assert_eq!(stranded_stats.5, 645017127080371.25);
+        assert_eq!(stranded_stats.6, 724161057685112.0);
+        assert_eq!(stranded_stats.7, 1017190976849038);
+        assert_eq!(stranded_stats.8, 114555416102223);
+
+        for _ in 0..4 {
+            stranded_nodes.push(Pubkey::from_str("11111113R2cuenjG5nFubqX9Wzuukdin2YfGQVzu5").unwrap());
+            stranded_nodes.push(Pubkey::from_str("11111112D1oxKts8YPdTJRG5FzxTNpMtWmq8hkVx3").unwrap());
+            stranded_nodes.push(Pubkey::from_str("111111131h1vYVSYuKP6AhS86fbRdMw9XHiZAvAaj").unwrap());
+            stranded_nodes.push(Pubkey::from_str("1111111QLbz7JHiBTspS962RLKV8GndWFwiEaqKM").unwrap());
+        }
+
+        for _ in 0..7 {
+            stranded_nodes.push(Pubkey::from_str("11111113R2cuenjG5nFubqX9Wzuukdin2YfGQVzu5").unwrap());
+            stranded_nodes.push(Pubkey::from_str("111111152P2r5yt6odmBLPsFCLBrFisJ3aS7LqLAT").unwrap());
+            stranded_nodes.push(Pubkey::from_str("1111111QLbz7JHiBTspS962RLKV8GndWFwiEaqKM").unwrap());
+            stranded_nodes.push(Pubkey::from_str("11111114DhpssPJgSi1YU7hCMfYt1BJ334YgsffXm").unwrap());
+        }
+
+        gossip_stats.insert_stranded_nodes(&stranded_nodes, &stakes);
+        gossip_stats.calculate_stranded_stats();
+        let stranded_stats = gossip_stats.get_stranded_stats();
+        assert_eq!(stranded_stats.0, 52);
+        assert_eq!(stranded_stats.1, 5.2);
+        assert_eq!(stranded_stats.2, 26.0);
+        assert_eq!(stranded_stats.3, 6.50);
+        assert_eq!(stranded_stats.4, 6.50);
+        assert_eq!(stranded_stats.5, 617812196595019.00);
+        assert_eq!(stranded_stats.6, 623567922929968.5);
+        assert_eq!(stranded_stats.7, 1017190976849038);
+        assert_eq!(stranded_stats.8, 114555416102223);
+    }
+
+    #[test]
     fn test_rmr() {
         const PUSH_FANOUT: usize = 2;
         const ACTIVE_SET_SIZE: usize = 12;
@@ -960,8 +1074,6 @@ mod tests {
         let stakes = repeat_with(|| rng.gen_range(1, MAX_STAKE));
         let mut stakes: HashMap<_, _> = nodes.iter().copied().zip(stakes).collect();
         stakes.insert(pubkey, rng.gen_range(1, MAX_STAKE));
-
-        println!("stakes len: {}", stakes.len());
 
         for (key, stake) in stakes.iter() {
             println!("{:?}, {}", key, stake);
@@ -988,7 +1100,7 @@ mod tests {
         // setup gossip
         run_gossip(&mut rng, &mut nodes, &stakes, ACTIVE_SET_SIZE);
 
-        for i in 0..GOSSIP_ITERATIONS {
+        for _ in 0..GOSSIP_ITERATIONS {
             {
                 let node_map: HashMap<Pubkey, &Node> = nodes
                     .iter()
@@ -1026,9 +1138,7 @@ mod tests {
         assert_eq!(gossip_stats.get_rmr_by_index(0), &2.8);
         assert_eq!(gossip_stats.get_rmr_by_index(95), &2.0);
 
-
         gossip_stats.calculate_rmr_stats();
-        gossip_stats.print_rmr_stats();
         let rmr_stats = gossip_stats.get_rmr_stats();
         assert_eq!(rmr_stats.0, 2.4800000000000044); //mean
         assert_eq!(rmr_stats.1, 2.8); //median
@@ -1047,8 +1157,6 @@ mod tests {
         let stakes = repeat_with(|| rng.gen_range(1, MAX_STAKE));
         let mut stakes: HashMap<_, _> = nodes.iter().copied().zip(stakes).collect();
         stakes.insert(pubkey, rng.gen_range(1, MAX_STAKE));
-
-        println!("stakes len: {}", stakes.len());
 
         for (key, stake) in stakes.iter() {
             println!("{:?}, {}", key, stake);
@@ -1074,7 +1182,6 @@ mod tests {
 
 
         gossip_stats.insert_hops_stat(&distances);
-        gossip_stats.print_hops_stats();
         let hop_stats = gossip_stats.get_per_hop_stats_by_index(0);
         assert_eq!(hop_stats.0, 1.8); //mean
         assert_eq!(hop_stats.1, 2.0); //median
@@ -1120,7 +1227,6 @@ mod tests {
         distances.insert(Pubkey::from_str("11111112D1oxKts8YPdTJRG5FzxTNpMtWmq8hkVx3").unwrap(), 1);
         distances.insert(Pubkey::from_str("1111111ogCyDbaRMvkdsHB3qfdyFYaG1WtRUAfdh").unwrap(), 6);
         gossip_stats.insert_hops_stat(&distances);
-        gossip_stats.print_hops_stats();
         let hop_stats = gossip_stats.get_per_hop_stats_by_index(2);
         assert_eq!(hop_stats.0, 3.5); //mean
         assert_eq!(hop_stats.1, 3.5); //median
@@ -1128,6 +1234,7 @@ mod tests {
         assert_eq!(hop_stats.3, 1); //min
 
         /* Aggregate Stats */
+        gossip_stats.calculate_aggregate_hop_stats();
         let agg_hop_stats = gossip_stats.get_aggregate_hop_stats();
         assert_eq!(agg_hop_stats.0, 2.0); //mean
         assert_eq!(agg_hop_stats.1, 1.5); //median
@@ -1152,8 +1259,6 @@ mod tests {
         let stakes = repeat_with(|| rng.gen_range(1, MAX_STAKE));
         let mut stakes: HashMap<_, _> = nodes.iter().copied().zip(stakes).collect();
         stakes.insert(pubkey, rng.gen_range(1, MAX_STAKE));
-
-        println!("stakes len: {}", stakes.len());
 
         for (key, stake) in stakes.iter() {
             println!("{:?}, {}", key, stake);

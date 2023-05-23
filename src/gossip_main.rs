@@ -274,7 +274,7 @@ fn main() {
         }
 
         stats.insert_stranded_nodes(
-            cluster.stranded_nodes(), 
+            &cluster.stranded_nodes(), 
             &stakes
         );
         
