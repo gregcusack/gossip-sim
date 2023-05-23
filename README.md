@@ -51,7 +51,10 @@ Graph visual:
 - Run the following where `<num-nodes>` is the number of nodes to write to a yaml file at `<path-to-yaml-file>`
     - Note: this method by default will pull from solana mainnet and get the `pubkey: stake` pairs and write them to a file
 ```
-cargo run --bin write-accounts -- --num-nodes <num-nodes> --account-file <path-to-yaml-file>
+cargo run --bin write-accounts -- 
+    --num-nodes <num-nodes> 
+    --account-file <path-to-yaml-file>
+    --filter-zero-staked-nodes
 ```
 
 #### Option 2: Read accounts from file and run simulation
@@ -68,6 +71,8 @@ cargo run --bin gossip-sim --
     --rotation-probability <probability-of-active-set-rotation> 
     --min-ingress-nodes <min-ingress-nodes> 
     --stake-threshold <min-stake-threshold>
+    --filter-zero-staked-nodes
+    --num-buckets <num-buckets-for-histogram>
 ```
 #### Option 3: Pull accounts from mainnet and run simulation
 - This will pull all node accounts from mainnet and simulate the network.
@@ -80,6 +85,8 @@ cargo run --bin gossip-sim --
     --rotation-probability <probability-of-active-set-rotation> 
     --min-ingress-nodes <min-ingress-nodes> 
     --stake-threshold <min-stake-threshold>
+    --filter-zero-staked-nodes
+    --num-buckets <num-buckets-for-histogram>
 ```
 
 ## Interpreting the output
