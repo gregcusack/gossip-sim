@@ -533,7 +533,7 @@ impl StrandedNodeCollection {
         self.stranded_node_mean_stake = self.total_stranded_stake as f64 / self.stranded_count() as f64;
         self.mean_standed_iterations_per_stranded_node = self.total_stranded_iterations as f64 / self.stranded_count() as f64;
 
-        info!("stranded count, total gossip iters: {}, {}", self.stranded_count(), self.total_gossip_iterations);
+        // info!("stranded count, total gossip iters: {}, {}", self.stranded_count(), self.total_gossip_iterations);
 
         stranded_iteration_counts.sort();
         stranded_stakes.sort();
