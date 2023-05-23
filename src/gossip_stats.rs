@@ -432,10 +432,10 @@ impl RelativeMessageRedundancyCollection {
         &self,
     ) {
         info!("Number of iterations: {}", self.rmrs.len());
-        println!("RMR {}", self.mean);
-        println!("RMR {}", self.median);
-        println!("RMR {}", self.max);
-        println!("RMR {}", self.min);
+        info!("RMR {}", self.mean);
+        info!("RMR {}", self.median);
+        info!("RMR {}", self.max);
+        info!("RMR {}", self.min);
     }
 }
 
@@ -1000,7 +1000,6 @@ mod tests {
             match cluster.relative_message_redundancy() {
                 Ok(result) => {
                     gossip_stats.insert_rmr(result);
-                    println!("rmr result: {}", result);
                 },
                 Err(_) => error!("Network RMR error. # of nodes is 1."),
             }
