@@ -439,6 +439,89 @@ impl RelativeMessageRedundancyCollection {
     }
 }
 
+pub struct Histogram {
+    // histogram. buckets are stranded count.
+    // amount in bucket is the number of nodes that were stranded that many times
+    entries: BTreeMap<u64, u64>,
+
+    min_stranded: u64,
+    max_stranded: u64,
+    bucket_range: u64,
+    num_buckets: u64,
+
+}
+
+impl Default for Histogram {
+    fn default() -> Self {
+        Self {
+            entries: BTreeMap::default(),
+            min_stranded: 0,
+            max_stranded: 0,
+            bucket_range: 0,
+            num_buckets: 0,
+        }
+    }
+}
+
+impl Histogram {
+
+
+    pub fn set_min_stranded(
+        &mut self,
+        val: u64,
+    ) {
+        self.min_stranded = val;
+    }
+
+    pub fn set_max_stranded(
+        &mut self,
+        val: u64,
+    ) {
+        self.max_stranded = val;
+    }
+
+    pub fn set_bucket_range(
+        &mut self,
+        val: u64,
+    ) {
+        self.bucket_range = val;
+    }
+
+    pub fn min_stranded(
+        &self,
+    ) -> u64 {
+        self.min_stranded
+    }
+
+    pub fn max_stranded(
+        &self,
+    ) -> u64 {
+        self.max_stranded
+    }
+
+    pub fn bucket_range(
+        &self,
+    ) -> u64 {
+        self.bucket_range
+    }
+
+    pub fn set_num_buckets(
+        &mut self,
+        val: u64,
+    ) {
+        self.num_buckets = val;
+    }
+
+    pub fn num_buckets(
+        &self,
+    ) -> u64 {
+        self.num_buckets
+    }
+
+
+}
+
+
 pub struct StrandedNodeCollection {
     stranded_nodes: HashMap<Pubkey, (/* stake */u64, /* times stranded */ u64)>, 
     /*
@@ -466,9 +549,9 @@ pub struct StrandedNodeCollection {
     stranded_node_max_stake: u64,
     stranded_node_min_stake: u64,
 
-    // histogram. buckets are stranded count.
-    // amount in bucket is the number of nodes that were stranded that many times
-    histogram: BTreeMap<u64, u64>,
+    // // histogram. buckets are stranded count.
+    // // amount in bucket is the number of nodes that were stranded that many times
+    histogram: Histogram,
 }
 
 impl Default for StrandedNodeCollection {
@@ -486,8 +569,8 @@ impl Default for StrandedNodeCollection {
             stranded_node_mean_stake: 0.0,
             stranded_node_median_stake: 0.0,
             stranded_node_max_stake: 0,
-            stranded_node_min_stake: 0,       
-            histogram: BTreeMap::default(), 
+            stranded_node_min_stake: 0,   
+            histogram: Histogram::default(),    
         }
     }
 }
@@ -652,29 +735,41 @@ impl StrandedNodeCollection {
         &mut self,
         num_buckets: u64,
     ) {        
+        self.histogram.set_num_buckets(num_buckets);
         // Determine the range of each bucket
-        let min_stranded = self.stranded_nodes.iter().map(|(_, (_, times_stranded))| *times_stranded).min().unwrap_or(0);
-        let max_stranded = self.stranded_nodes.iter().map(|(_, (_, times_stranded))| *times_stranded).max().unwrap_or(0);
-        let bucket_range = (max_stranded - min_stranded + num_buckets - 1) / num_buckets;
+        self.histogram
+            .set_min_stranded(
+                self.stranded_nodes
+                        .iter()
+                        .map(|(_, (_, times_stranded))| *times_stranded)
+                        .min()
+                        .unwrap_or(0));
+
+         self.histogram
+            .set_max_stranded(
+                self.stranded_nodes
+                        .iter()
+                        .map(|(_, (_, times_stranded))| *times_stranded)
+                        .max()
+                        .unwrap_or(0));
+
+        self.histogram.set_bucket_range(
+            (self.histogram.max_stranded() - self.histogram.min_stranded() + self.histogram.num_buckets() - 1) / self.histogram.num_buckets());
         
         // Iterate over the stranded_nodes entries
         for (_, times_stranded) in self.stranded_nodes.values() {
             // Determine the bucket index based on the times_stranded value
-            let bucket = (*times_stranded - min_stranded) / bucket_range;
+            let bucket = (*times_stranded - self.histogram.min_stranded()) / self.histogram.bucket_range();
             
             // Increment the count for the bucket in the histogram
-            *self.histogram.entry(bucket).or_insert(0) += 1;
+            *self.histogram.entries.entry(bucket).or_insert(0) += 1;
         }
+    }
 
-        info!("|---------------------------------|");
-        info!("|---- HISTOGRAM W/ {} BUCKETS ----|", num_buckets);
-        info!("|---------------------------------|"); 
-        // Print the histogram sorted by bucket index
-        for (bucket, count) in &self.histogram {
-            let bucket_min = min_stranded + bucket * bucket_range;
-            let bucket_max = min_stranded + (bucket + 1) * bucket_range - 1;
-            info!("Bucket: {}-{}: Count: {}", bucket_min, bucket_max, count);
-        }
+    pub fn get_histogram(
+        &self,
+    ) -> &Histogram {
+        &self.histogram
     }
 
 }
@@ -970,6 +1065,21 @@ impl GossipStats {
         self.stranded_nodes.build_historgram(num_buckets);
     }
 
+    pub fn print_stranded_node_histogram(
+        &self,
+    ) {
+        let histogram = self.stranded_nodes.get_histogram();
+        info!("|---------------------------------|");
+        info!("|---- HISTOGRAM W/ {} BUCKETS ----|", histogram.num_buckets());
+        info!("|---------------------------------|"); 
+        // Print the histogram sorted by bucket index
+        for (bucket, count) in histogram.entries.iter() {
+            let bucket_min = histogram.min_stranded() + bucket * histogram.bucket_range();
+            let bucket_max = histogram.min_stranded() + (bucket + 1) * histogram.bucket_range() - 1;
+            info!("Bucket: {}-{}: Count: {}", bucket_min, bucket_max, count);
+        }
+    }
+
     pub fn print_all(
         &mut self,
         num_buckets: u64
@@ -990,6 +1100,8 @@ impl GossipStats {
         self.print_stranded_stats();
 
         self.build_stranded_node_histogram(num_buckets);
+        self.print_stranded_node_histogram();
+
         self.print_stranded();
         // self.print_hops_stats();
     }
