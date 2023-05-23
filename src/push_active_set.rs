@@ -301,7 +301,7 @@ mod tests {
 
         for (index, pase) in active_set.0.iter().enumerate() {
             if index == 20 {
-                for (pubkey, bloom) in &pase.0 {
+                for (pubkey, _bloom) in &pase.0 {
                     println!("node: {:?}", pubkey);
                 }
             }

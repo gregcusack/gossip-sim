@@ -274,7 +274,7 @@ fn main() {
         }
 
         stats.insert_stranded_nodes(
-            cluster.stranded_nodes(), 
+            &cluster.stranded_nodes(), 
             &stakes
         );
         
@@ -470,7 +470,7 @@ mod tests {
 
             cluster.consume_messages(origin_pubkey, &mut nodes);
             cluster.send_prunes(*origin_pubkey, &mut nodes, PRUNE_STAKE_THRESHOLD, MIN_INGRESS_NODES, &stakes);
-            let prunes = cluster.get_prunes_v2();
+            let prunes = cluster.get_prunes();
             assert_eq!(prunes.len(), 6);
             for (pruner, prune) in prunes.iter() {
                 if i <= 18 {

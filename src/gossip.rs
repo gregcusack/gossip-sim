@@ -221,7 +221,7 @@ impl Cluster {
         &self.distances
     }
 
-    pub fn get_prunes_v2(
+    pub fn get_prunes(
         &self,
     ) -> &HashMap<Pubkey, HashMap<Pubkey, Vec<Pubkey>>> {
         &self.prunes
