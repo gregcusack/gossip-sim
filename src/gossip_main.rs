@@ -15,6 +15,7 @@ use {
         },
         gossip_stats::{
             GossipStats,
+            GossipStatsCollection,
         },
     },
     solana_client::rpc_client::RpcClient,
@@ -206,7 +207,7 @@ fn find_nth_largest_node(n: usize, nodes: &[Node]) -> Option<&Node> {
     heap.peek().map(|Reverse(stake)| nodes.iter().find(|node| node.stake() == *stake)).flatten()
 }
 
-fn run_simulation(config: &Config, matches: &ArgMatches) {
+fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection: &mut GossipStatsCollection) {
     // check if we want to read in pubkeys/stakes from a file
     let nodes = if config.accounts_from_file {
         // READ ACCOUNTS FROM FILE
@@ -271,9 +272,13 @@ fn run_simulation(config: &Config, matches: &ArgMatches) {
     let mut _number_of_poor_coverage_runs: usize = 0;
     let poor_coverage_threshold: f64 = 0.95;
     let mut stats = GossipStats::default();
+    stats.set_simulation_parameters(config);
+    stats.set_origin(*origin_pubkey);
     info!("Calculating the MSTs for origin: {:?}, stake: {}", origin_pubkey, stakes.get(origin_pubkey).unwrap());
     for i in 0..config.gossip_iterations {
-        info!("MST ITERATION: {}", i);
+        if i % 10 == 0 {
+            info!("MST ITERATION: {}", i);
+        }
         {
             let node_map: HashMap<Pubkey, &Node> = nodes
                 .iter()
@@ -338,7 +343,9 @@ fn run_simulation(config: &Config, matches: &ArgMatches) {
         cluster.chance_to_rotate(&mut rng, &mut nodes, config.gossip_active_set_size, &stakes, config.probability_of_rotation, &mut StdRng::from_entropy());
     }
 
-    stats.print_all(config.num_buckets_for_stranded_node_hist);
+    stats.run_all_calculations(config.num_buckets_for_stranded_node_hist);
+    // stats.print_all();
+    gossip_stats_collection.push(stats.clone());
 }
 
 fn main() {
@@ -348,7 +355,6 @@ fn main() {
     solana_logger::setup();
 
     let matches = parse_matches();
-
     let config = Config {
         gossip_push_fanout: value_t_or_exit!(matches, "gossip_push_fanout", usize),
         gossip_active_set_size: value_t_or_exit!(matches, "gossip_push_active_set_entry_size", usize),
@@ -364,9 +370,9 @@ fn main() {
         test_type: matches
                     .value_of("test_type")
                     .map(|val| val.parse::<Testing>()
-                        .unwrap_or_else(|_| Testing::NoTest(true))
+                        .unwrap_or_else(|_| Testing::NoTest)
                     )
-                    .unwrap_or(Testing::NoTest(true)),
+                    .unwrap_or(Testing::NoTest),
         num_simulations: matches
                     .value_of("num_simulations")
                     .map(|val| val.parse::<usize>().unwrap_or_else(|_| {
@@ -391,8 +397,11 @@ fn main() {
                     .unwrap(),
     };
 
+    let mut gossip_stats_collection = GossipStatsCollection::default();
+    gossip_stats_collection.set_number_of_simulations(config.num_simulations);
+
     match config.test_type {
-        Testing::ActiveSetSize(true) => {
+        Testing::ActiveSetSize => {
             let initial_active_set_size = config.gossip_active_set_size;
 
             for i in 0..config.num_simulations {
@@ -404,10 +413,10 @@ fn main() {
                 config.gossip_active_set_size = active_set_size;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches);
+                run_simulation(&config, &matches, &mut gossip_stats_collection);
             }
         }
-        Testing::PushFanout(true) => {
+        Testing::PushFanout => {
             let step_size: usize = config.step_size.into();
             let initial_push_fanout = config.gossip_push_fanout;
 
@@ -419,11 +428,11 @@ fn main() {
                 config.gossip_push_fanout = push_fanout;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches);
+                run_simulation(&config, &matches, &mut gossip_stats_collection);
             }
 
         }
-        Testing::MinIngressNodes(true) => {
+        Testing::MinIngressNodes => {
             let step_size: usize = config.step_size.into();
             let initial_min_ingress_nodes = config.min_ingress_nodes;
 
@@ -435,10 +444,10 @@ fn main() {
                 config.min_ingress_nodes = min_ingress_nodes;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches);
+                run_simulation(&config, &matches, &mut gossip_stats_collection);
             }
         }
-        Testing::MinStakeThreshold(true) => {
+        Testing::MinStakeThreshold => {
             let step_size: f64 = config.step_size.into();
             let initial_prune_stake_threshold = config.prune_stake_threshold;
 
@@ -450,10 +459,10 @@ fn main() {
                 config.prune_stake_threshold = prune_stake_threshold;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches);
+                run_simulation(&config, &matches, &mut gossip_stats_collection);
             }
         }
-        Testing::OriginRank(true) => {
+        Testing::OriginRank => {
             let step_size: usize = config.step_size.into();
             let initial_origin_rank = config.origin_rank;
 
@@ -465,16 +474,15 @@ fn main() {
                 config.origin_rank = origin_rank;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches);
+                run_simulation(&config, &matches, &mut gossip_stats_collection);
             }
         }
-        Testing::NoTest(true) => {
-            run_simulation(&config, &matches);
-        }
-        _ => {
-            run_simulation(&config, &matches);
+        Testing::NoTest => {
+            run_simulation(&config, &matches, &mut gossip_stats_collection);
         }
     }
+
+    gossip_stats_collection.print_all(config.gossip_iterations, config.test_type);
 
 }
 

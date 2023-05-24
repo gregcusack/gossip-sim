@@ -26,12 +26,25 @@ pub(crate) const CRDS_UNIQUE_PUBKEY_CAPACITY: usize = 8192;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Testing {
-    ActiveSetSize(bool),
-    PushFanout(bool),
-    MinIngressNodes(bool),
-    MinStakeThreshold(bool),
-    OriginRank(bool),
-    NoTest(bool),
+    ActiveSetSize,
+    PushFanout,
+    MinIngressNodes,
+    MinStakeThreshold,
+    OriginRank,
+    NoTest,
+}
+
+impl std::fmt::Display for Testing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Testing::ActiveSetSize => write!(f, "ActiveSetSize"),
+            Testing::PushFanout => write!(f, "PushFanout()"),
+            Testing::MinIngressNodes => write!(f, "MinIngressNodes()"),
+            Testing::MinStakeThreshold => write!(f, "MinStakeThreshold()"),
+            Testing::OriginRank => write!(f, "OriginRank()"),
+            Testing::NoTest => write!(f, "NoTest()"),
+        }
+    }
 }
 
 impl FromStr for Testing {
@@ -39,12 +52,12 @@ impl FromStr for Testing {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "active-set-size" => Ok(Testing::ActiveSetSize(true)),
-            "push-fanout" => Ok(Testing::PushFanout(true)),
-            "min-ingress-nodes" => Ok(Testing::MinIngressNodes(true)),
-            "min-stake-threshold" => Ok(Testing::MinStakeThreshold(true)),
-            "origin-rank" => Ok(Testing::OriginRank(true)),
-            "no-test" => Ok(Testing::NoTest(true)),
+            "active-set-size" => Ok(Testing::ActiveSetSize),
+            "push-fanout" => Ok(Testing::PushFanout),
+            "min-ingress-nodes" => Ok(Testing::MinIngressNodes),
+            "min-stake-threshold" => Ok(Testing::MinStakeThreshold),
+            "origin-rank" => Ok(Testing::OriginRank),
+            "no-test" => Ok(Testing::NoTest),
             _ => Err(format!("Invalid test type: {}", s)),
         }
     }
