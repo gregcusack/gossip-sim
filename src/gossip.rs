@@ -24,6 +24,56 @@ use {
 #[cfg_attr(test, cfg(test))]
 pub(crate) const CRDS_UNIQUE_PUBKEY_CAPACITY: usize = 8192;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Testing {
+    ActiveSetSize(bool),
+    PushFanout(bool),
+    MinIngressNodes(bool),
+    MinStakeThreshold(bool),
+    OriginRank(bool),
+    NoTest(bool),
+}
+
+impl FromStr for Testing {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "active-set-size" => Ok(Testing::ActiveSetSize(true)),
+            "push-fanout" => Ok(Testing::PushFanout(true)),
+            "min-ingress-nodes" => Ok(Testing::MinIngressNodes(true)),
+            "min-stake-threshold" => Ok(Testing::MinStakeThreshold(true)),
+            "origin-rank" => Ok(Testing::OriginRank(true)),
+            "no-test" => Ok(Testing::NoTest(true)),
+            _ => Err(format!("Invalid test type: {}", s)),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum StepSize {
+    Integer(usize),
+    Float(f64),
+}
+
+impl From<StepSize> for usize {
+    fn from(value: StepSize) -> Self {
+        match value {
+            StepSize::Integer(num) => num,
+            StepSize::Float(num) => num as usize,
+        }
+    }
+}
+
+impl From<StepSize> for f64 {
+    fn from(value: StepSize) -> Self {
+        match value {
+            StepSize::Integer(num) => num as f64,
+            StepSize::Float(num) => num,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Config<'a> {
     pub gossip_push_fanout: usize,
@@ -37,6 +87,9 @@ pub struct Config<'a> {
     pub min_ingress_nodes: usize,
     pub filter_zero_staked_nodes: bool,
     pub num_buckets_for_stranded_node_hist: u64,
+    pub test_type: Testing,
+    pub num_simulations: usize,
+    pub step_size: StepSize,
 }
 
 pub struct Cluster {
@@ -578,7 +631,6 @@ impl Cluster {
 
 
 }
-
 
 pub struct Node {
     _clock: Instant,
