@@ -1,8 +1,7 @@
-
 use {
     crate::{Stats, HopsStats},
     log::{info, error},
-    std::collections::{HashMap, BTreeMap},
+    std::collections::{HashMap, BTreeMap, HashSet},
     solana_sdk::pubkey::Pubkey,
     crate::gossip::{Testing, StepSize, Config},
 };
@@ -806,6 +805,162 @@ impl StrandedNodeCollection {
 }
 
 #[derive(Debug, Clone)]
+pub struct BranchingFactor {
+    // factor: f64,
+}
+
+// impl Default for BranchingFactor {
+//     fn default() -> Self {
+//         Self {
+//             factor: 0.0,
+//         }
+//     }
+// }
+
+// NOTE: This will measure branching factor of all visited nodes
+// Does NOT include nodes that were not visited
+impl BranchingFactor {
+    pub fn calculate_outbound(
+        // &mut self,
+        pushes: &HashMap<Pubkey, HashSet<Pubkey>>,
+    ) -> f64 {
+        let total_nodes = pushes.len();
+        let mut outgoing_connections = 0;
+    
+        for destination in pushes.values() {
+            outgoing_connections += destination.len();
+        }
+    
+        if total_nodes > 0 {
+            outgoing_connections as f64 / total_nodes as f64
+        } else {
+            0.0 // 0 if the graph has no nodes
+        }
+    }
+
+    pub fn calculate_inbound(
+        orders: &HashMap<Pubkey, HashMap<Pubkey, u64>>,
+    ) -> f64 {
+        let total_nodes = orders.len();
+        let mut inbound_connections = 0;
+    
+        for source in orders.values() {
+            inbound_connections += source.len();
+        }
+    
+        if total_nodes > 0 {
+            inbound_connections as f64 / total_nodes as f64
+        } else {
+            // self.factor = 0.0 // 0 if the graph has no nodes
+            0.0 // 0 if the graph has no nodes
+        }
+    }
+
+
+}
+
+#[derive(Debug, Clone)]
+pub struct BranchingFactorCollection {
+    factors: Vec<f64>,
+    mean: Stats,
+    median: Stats,
+    max: Stats,
+    min: Stats,
+}
+
+impl Default for BranchingFactorCollection {
+    fn default() -> Self {
+        Self {
+            factors: Vec::default(),
+            mean: Stats::Mean(0.0),
+            median: Stats::Median(0.0),
+            max: Stats::Max(0.0),
+            min: Stats::Min(0.0),
+        }
+    }
+}
+
+impl BranchingFactorCollection {
+    pub fn push(
+        &mut self,
+        factor: f64,
+    ) {
+        self.factors.push(factor);
+    }
+
+    pub fn calculate_stats (
+        &mut self,
+    ) {
+        // clone to maintain iteration order for print_stats
+        let mut sorted_factors = self.factors.clone();
+        sorted_factors
+            .sort_by(|a, b| a
+                    .partial_cmp(b)
+                    .unwrap());
+        let len = sorted_factors.len();
+        let mean = sorted_factors
+            .iter()
+            .sum::<f64>() / len as f64;
+        let median = if len % 2 == 0 {
+            (sorted_factors[len / 2 - 1] + sorted_factors[len / 2]) / 2.0
+        } else {
+            sorted_factors[len / 2]
+        };
+        let max = *sorted_factors
+            .last()
+            .unwrap_or(&0.0);
+        let min = *sorted_factors
+            .first()
+            .unwrap_or(&0.0);
+
+        self.mean = Stats::Mean(mean);
+        self.median = Stats::Median(median);
+        self.max = Stats::Max(max);
+        self.min = Stats::Min(min);
+    }
+
+    pub fn mean(&self) -> f64 {
+        match &self.mean {
+            Stats::Mean(val) => *val,
+            _ => panic!("Unexpected value in mean field"),
+        }
+    }
+
+    pub fn max(&self) -> f64 {
+        match &self.max {
+            Stats::Max(val) => *val,
+            _ => panic!("Unexpected value in max field"),
+        }
+    }
+
+    pub fn min(&self) -> f64 {
+        match &self.min {
+            Stats::Min(val) => *val,
+            _ => panic!("Unexpected value in min field"),
+        }
+    }
+
+    pub fn median(&self) -> f64 {
+        match &self.median {
+            Stats::Median(val) => *val,
+            _ => panic!("Unexpected value in median field"),
+        }
+    }
+
+    pub fn print_stats (
+        &self,
+        direction: &str,
+    ) {
+        // info!("Number of iterations: {}", self.coverages.len());
+        info!("{} Branching Factor: {}", direction, self.mean);
+        info!("{} Branching Factor: {}", direction, self.median);
+        info!("{} Branching Factor: {}", direction, self.max);
+        info!("{} Branching Factor: {}", direction, self.min);
+    }   
+}
+
+
+#[derive(Debug, Clone)]
 pub struct SimulationParamaters {
     pub gossip_push_fanout: usize,
     pub gossip_active_set_size: usize,
@@ -842,6 +997,8 @@ pub struct GossipStats {
     coverage_stats: CoverageStatsCollection,
     relative_message_redundancy_stats: RelativeMessageRedundancyCollection,
     stranded_nodes: StrandedNodeCollection,
+    outbound_branching_factors: BranchingFactorCollection,
+    inbound_branching_factors: BranchingFactorCollection,
     origin: Pubkey,
     pub simulation_parameters: SimulationParamaters,
 }
@@ -853,6 +1010,8 @@ impl Default for GossipStats {
             coverage_stats: CoverageStatsCollection::default(),
             relative_message_redundancy_stats: RelativeMessageRedundancyCollection::default(),
             stranded_nodes: StrandedNodeCollection::default(),
+            outbound_branching_factors: BranchingFactorCollection::default(),
+            inbound_branching_factors: BranchingFactorCollection::default(),
             origin: Pubkey::default(),
             simulation_parameters: SimulationParamaters::default(),
         }
@@ -1178,6 +1337,46 @@ impl GossipStats {
         }
     }
 
+    pub fn print_branching_factor_stats(
+        &self,
+    ) {
+        info!("|-----------------------------------|");
+        info!("|---- OUTBOUND BRANCHING FACTOR ----|");
+        info!("|-----------------------------------|"); 
+        self.outbound_branching_factors.print_stats("Outbound");
+        info!("|----------------------------------|");
+        info!("|---- INBOUND BRANCHING FACTOR ----|");
+        info!("|----------------------------------|"); 
+        self.inbound_branching_factors.print_stats("Inbound");
+    }
+
+    pub fn calculate_outbound_branching_factor(
+        &mut self,
+        pushes: &HashMap<Pubkey, HashSet<Pubkey>>,
+    ) {
+        self.outbound_branching_factors
+            .push(
+                BranchingFactor::calculate_outbound(pushes));
+
+    }
+
+    pub fn calculate_inbound_branching_factor(
+        &mut self,
+        orders: &HashMap<Pubkey, HashMap<Pubkey, u64>>,
+    ) {
+        self.inbound_branching_factors
+            .push(
+                BranchingFactor::calculate_inbound(orders));
+
+    }
+
+    pub fn calculate_branching_factor_stats(
+        &mut self,
+    ) {
+        self.outbound_branching_factors.calculate_stats();
+        self.inbound_branching_factors.calculate_stats();
+    }
+
     pub fn run_all_calculations(
         &mut self,
         num_buckets: u64,
@@ -1188,6 +1387,8 @@ impl GossipStats {
         self.calculate_last_delivery_hop_stats();
         self.calculate_stranded_stats();
         self.build_stranded_node_histogram(num_buckets);
+        self.calculate_branching_factor_stats();
+
     }
 
     pub fn print_all(
@@ -1200,6 +1401,7 @@ impl GossipStats {
         self.print_stranded_stats();
         self.print_stranded_node_histogram();
         self.print_stranded();
+        self.print_branching_factor_stats();
         // self.print_hops_stats();
     }
 }

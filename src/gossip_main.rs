@@ -328,6 +328,9 @@ fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection
             Err(_) => error!("Network RMR error. # of nodes is 1."),
         }
 
+        stats.calculate_outbound_branching_factor(cluster.get_pushes());
+        stats.calculate_inbound_branching_factor(cluster.get_orders());
+
         cluster.consume_messages(origin_pubkey, &mut nodes);
         cluster.send_prunes(*origin_pubkey, &mut nodes, config.prune_stake_threshold, config.min_ingress_nodes, &stakes);
         

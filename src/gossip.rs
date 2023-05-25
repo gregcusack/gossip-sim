@@ -236,7 +236,7 @@ impl Cluster {
             .len()
     }
 
-    pub fn get_orders(
+    pub fn get_orders_hops(
         &self,
         dest_node: &Pubkey,
         src_node: &Pubkey,
@@ -245,6 +245,12 @@ impl Cluster {
             .get(dest_node)
             .unwrap()
             .get(src_node)
+    }
+
+    pub fn get_orders(
+        &self,
+    ) -> &HashMap<Pubkey, HashMap<Pubkey, u64>> {
+        &self.orders
     }
 
     pub fn get_visited_len(
@@ -342,6 +348,12 @@ impl Cluster {
                 info!("Prunee: {:?}", prunee);
             }
         }
+    }
+
+    pub fn get_pushes(
+        &self,
+    ) -> &HashMap<Pubkey, HashSet<Pubkey>> {
+        &self.pushes
     }
 
     pub fn print_pushes(
@@ -455,6 +467,9 @@ impl Cluster {
                     // }
 
                     // add neighbor to current_node pushes map
+                    // I think this is the one we care about at all times.
+                    // TBH not sure MST is really useful. 
+                    // We care about who a node is pushing too.
                     self.pushes
                         .get_mut(&current_node_pubkey)
                         .unwrap()
@@ -965,25 +980,25 @@ mod tests {
         
         // check num of hops per inbound connection
         // M
-        assert_eq!(cluster.get_orders(&nodes[0].pubkey(), &nodes[1].pubkey()).unwrap(), &4u64); // M <- h, 4 hops
-        assert_eq!(cluster.get_orders(&nodes[0].pubkey(), &nodes[4].pubkey()).unwrap(), &2u64); // M <- j, 2 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[0].pubkey(), &nodes[1].pubkey()).unwrap(), &4u64); // M <- h, 4 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[0].pubkey(), &nodes[4].pubkey()).unwrap(), &2u64); // M <- j, 2 hops
 
         // h
-        assert_eq!(cluster.get_orders(&nodes[1].pubkey(), &nodes[0].pubkey()).unwrap(), &3u64); // h <- M, 3 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[1].pubkey(), &nodes[0].pubkey()).unwrap(), &3u64); // h <- M, 3 hops
 
         // 3 
-        assert_eq!(cluster.get_orders(&nodes[2].pubkey(), &nodes[0].pubkey()).unwrap(), &3u64); // 3 <- M, 3 hops
-        assert_eq!(cluster.get_orders(&nodes[2].pubkey(), &nodes[3].pubkey()).unwrap(), &3u64); // 3 <- P, 3 hops
-        assert_eq!(cluster.get_orders(&nodes[2].pubkey(), &nodes[5].pubkey()).unwrap(), &1u64); // 3 <- 5, 1 hop
+        assert_eq!(cluster.get_orders_hops(&nodes[2].pubkey(), &nodes[0].pubkey()).unwrap(), &3u64); // 3 <- M, 3 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[2].pubkey(), &nodes[3].pubkey()).unwrap(), &3u64); // 3 <- P, 3 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[2].pubkey(), &nodes[5].pubkey()).unwrap(), &1u64); // 3 <- 5, 1 hop
 
         // P
-        assert_eq!(cluster.get_orders(&nodes[0].pubkey(), &nodes[1].pubkey()).unwrap(), &4u64); // M <- h, 4 hops
-        assert_eq!(cluster.get_orders(&nodes[0].pubkey(), &nodes[4].pubkey()).unwrap(), &2u64); // M <- j, 2 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[0].pubkey(), &nodes[1].pubkey()).unwrap(), &4u64); // M <- h, 4 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[0].pubkey(), &nodes[4].pubkey()).unwrap(), &2u64); // M <- j, 2 hops
 
         // j
-        assert_eq!(cluster.get_orders(&nodes[4].pubkey(), &nodes[2].pubkey()).unwrap(), &2u64); // j <- 3, 2 hops
-        assert_eq!(cluster.get_orders(&nodes[4].pubkey(), &nodes[3].pubkey()).unwrap(), &3u64); // j <- P, 3 hops
-        assert_eq!(cluster.get_orders(&nodes[4].pubkey(), &nodes[5].pubkey()).unwrap(), &1u64); // j <- 5, 1 hop
+        assert_eq!(cluster.get_orders_hops(&nodes[4].pubkey(), &nodes[2].pubkey()).unwrap(), &2u64); // j <- 3, 2 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[4].pubkey(), &nodes[3].pubkey()).unwrap(), &3u64); // j <- P, 3 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[4].pubkey(), &nodes[5].pubkey()).unwrap(), &1u64); // j <- 5, 1 hop
 
         // 5 - None
         // ensure origin is NOT in the orders map
