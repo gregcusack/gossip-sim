@@ -10,9 +10,12 @@ use {
             Node,
             Cluster,
             Config,
+            Testing,
+            StepSize,
         },
         gossip_stats::{
             GossipStats,
+            GossipStatsCollection,
         },
     },
     solana_client::rpc_client::RpcClient,
@@ -133,7 +136,46 @@ fn parse_matches() -> ArgMatches {
                 .default_value("10")
                 .help("Number of buckets for the stranded node histogram. see gossip_stats.rs"),
         )
+        .arg(
+                Arg::with_name("test_type")
+                .long("test-type")
+                .takes_value(true)
+                .validator(validate_testing)
+                .requires("num_simulations")
+                .requires("step_size")
+                .help("Type of test to run.
+                    active-set-size
+                    push-fanout
+                    min-ingress-nodes
+                    min-stake-threshold
+                    origin-rank
+                    [default: no-test]
+                "),
+        )
+        .arg(
+            Arg::with_name("num_simulations")
+                .long("num-simulations")
+                .takes_value(true)
+                .default_value("1")
+                .requires("test_type")
+                .help("Number of simulations to run. [default: 1]"),
+        )
+        .arg(
+            Arg::with_name("step_size")
+                .long("step-size")
+                .takes_value(true)
+                .default_value("1")
+                .requires("test_type")
+                .help("Size of step for test_type. [default: 1]"),
+        )
         .get_matches()
+}
+
+
+fn validate_testing(val: &str) -> Result<(), String> {
+    val.parse::<Testing>()
+        .map(|_| ())
+        .map_err(|_| "Invalid test type".to_string())
 }
 
 
@@ -165,31 +207,7 @@ fn find_nth_largest_node(n: usize, nodes: &[Node]) -> Option<&Node> {
     heap.peek().map(|Reverse(stake)| nodes.iter().find(|node| node.stake() == *stake)).flatten()
 }
 
-fn main() {
-    if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "INFO");
-    }
-    solana_logger::setup();
-
-    let matches = parse_matches();
-
-    let config = Config {
-        gossip_push_fanout: value_t_or_exit!(matches, "gossip_push_fanout", usize),
-        gossip_active_set_size: value_t_or_exit!(matches, "gossip_push_active_set_entry_size", usize),
-        gossip_iterations: value_t_or_exit!(matches, "gossip_iterations", usize),
-        accounts_from_file: matches.is_present("accounts_from_yaml"),
-        account_file: matches.value_of("account_file").unwrap_or_default(),
-        origin_rank: value_t_or_exit!(matches, "origin_rank", usize),
-        probability_of_rotation: value_t_or_exit!(matches, "active_set_rotation_probability", f64),
-        prune_stake_threshold: value_t_or_exit!(matches, "prune_stake_threshold", f64), 
-        min_ingress_nodes: value_t_or_exit!(matches, "min_ingress_nodes", usize),
-        filter_zero_staked_nodes: matches.is_present("remove_zero_staked_nodes"),
-        num_buckets_for_stranded_node_hist: value_t_or_exit!(matches, "num_buckets_for_stranded_node_hist", u64),
-    };
-
-    // check if we want to write keys and stakes to a file
-    // let account_file = matches.value_of("account_file").unwrap_or_default();
-
+fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection: &mut GossipStatsCollection) {
     // check if we want to read in pubkeys/stakes from a file
     let nodes = if config.accounts_from_file {
         // READ ACCOUNTS FROM FILE
@@ -254,9 +272,13 @@ fn main() {
     let mut _number_of_poor_coverage_runs: usize = 0;
     let poor_coverage_threshold: f64 = 0.95;
     let mut stats = GossipStats::default();
+    stats.set_simulation_parameters(config);
+    stats.set_origin(*origin_pubkey);
     info!("Calculating the MSTs for origin: {:?}, stake: {}", origin_pubkey, stakes.get(origin_pubkey).unwrap());
     for i in 0..config.gossip_iterations {
-        info!("MST ITERATION: {}", i);
+        if i % 10 == 0 {
+            info!("MST ITERATION: {}", i);
+        }
         {
             let node_map: HashMap<Pubkey, &Node> = nodes
                 .iter()
@@ -321,7 +343,146 @@ fn main() {
         cluster.chance_to_rotate(&mut rng, &mut nodes, config.gossip_active_set_size, &stakes, config.probability_of_rotation, &mut StdRng::from_entropy());
     }
 
-    stats.print_all(config.num_buckets_for_stranded_node_hist);
+    stats.run_all_calculations(config.num_buckets_for_stranded_node_hist);
+    // stats.print_all();
+    gossip_stats_collection.push(stats.clone());
+}
+
+fn main() {
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "INFO");
+    }
+    solana_logger::setup();
+
+    let matches = parse_matches();
+    let config = Config {
+        gossip_push_fanout: value_t_or_exit!(matches, "gossip_push_fanout", usize),
+        gossip_active_set_size: value_t_or_exit!(matches, "gossip_push_active_set_entry_size", usize),
+        gossip_iterations: value_t_or_exit!(matches, "gossip_iterations", usize),
+        accounts_from_file: matches.is_present("accounts_from_yaml"),
+        account_file: matches.value_of("account_file").unwrap_or_default(),
+        origin_rank: value_t_or_exit!(matches, "origin_rank", usize),
+        probability_of_rotation: value_t_or_exit!(matches, "active_set_rotation_probability", f64),
+        prune_stake_threshold: value_t_or_exit!(matches, "prune_stake_threshold", f64), 
+        min_ingress_nodes: value_t_or_exit!(matches, "min_ingress_nodes", usize),
+        filter_zero_staked_nodes: matches.is_present("remove_zero_staked_nodes"),
+        num_buckets_for_stranded_node_hist: value_t_or_exit!(matches, "num_buckets_for_stranded_node_hist", u64),
+        test_type: matches
+                    .value_of("test_type")
+                    .map(|val| val.parse::<Testing>()
+                        .unwrap_or_else(|_| Testing::NoTest)
+                    )
+                    .unwrap_or(Testing::NoTest),
+        num_simulations: matches
+                    .value_of("num_simulations")
+                    .map(|val| val.parse::<usize>().unwrap_or_else(|_| {
+                        eprintln!("Invalid num_simulations value");
+                        exit(1);
+                    }))
+                    .unwrap(),
+        step_size: matches
+                    .value_of("step_size")
+                    .map(|val| {
+                        val.parse::<usize>()
+                            .map(StepSize::Integer)
+                            .unwrap_or_else(|_| {
+                                val.parse::<f64>()
+                                    .map(StepSize::Float)
+                                    .unwrap_or_else(|_| {
+                                        eprintln!("Invalid step_size value");
+                                        exit(1);
+                                    })
+                            })
+                    })
+                    .unwrap(),
+    };
+
+    let mut gossip_stats_collection = GossipStatsCollection::default();
+    gossip_stats_collection.set_number_of_simulations(config.num_simulations);
+
+    match config.test_type {
+        Testing::ActiveSetSize => {
+            let initial_active_set_size = config.gossip_active_set_size;
+
+            for i in 0..config.num_simulations {
+                let step_size: usize = config.step_size.into();
+                let active_set_size = initial_active_set_size + (i * step_size);
+
+                // Update the active_set_size in the config for each experiment
+                let mut config = config.clone();
+                config.gossip_active_set_size = active_set_size;
+        
+                // Run the experiment with the updated config
+                run_simulation(&config, &matches, &mut gossip_stats_collection);
+            }
+        }
+        Testing::PushFanout => {
+            let step_size: usize = config.step_size.into();
+            let initial_push_fanout = config.gossip_push_fanout;
+
+            for i in 0..config.num_simulations {
+                let push_fanout = initial_push_fanout + (i * step_size);
+
+                // Update the active_set_size in the config for each experiment
+                let mut config = config.clone();
+                config.gossip_push_fanout = push_fanout;
+        
+                // Run the experiment with the updated config
+                run_simulation(&config, &matches, &mut gossip_stats_collection);
+            }
+
+        }
+        Testing::MinIngressNodes => {
+            let step_size: usize = config.step_size.into();
+            let initial_min_ingress_nodes = config.min_ingress_nodes;
+
+            for i in 0..config.num_simulations {
+                let min_ingress_nodes = initial_min_ingress_nodes + (i * step_size);
+
+                // Update the active_set_size in the config for each experiment
+                let mut config = config.clone();
+                config.min_ingress_nodes = min_ingress_nodes;
+        
+                // Run the experiment with the updated config
+                run_simulation(&config, &matches, &mut gossip_stats_collection);
+            }
+        }
+        Testing::MinStakeThreshold => {
+            let step_size: f64 = config.step_size.into();
+            let initial_prune_stake_threshold = config.prune_stake_threshold;
+
+            for i in 0..config.num_simulations {
+                let prune_stake_threshold = initial_prune_stake_threshold + (i as f64 * step_size);
+
+                // Update the active_set_size in the config for each experiment
+                let mut config = config.clone();
+                config.prune_stake_threshold = prune_stake_threshold;
+        
+                // Run the experiment with the updated config
+                run_simulation(&config, &matches, &mut gossip_stats_collection);
+            }
+        }
+        Testing::OriginRank => {
+            let step_size: usize = config.step_size.into();
+            let initial_origin_rank = config.origin_rank;
+
+            for i in 0..config.num_simulations {
+                let origin_rank = initial_origin_rank + (i * step_size);
+
+                // Update the active_set_size in the config for each experiment
+                let mut config = config.clone();
+                config.origin_rank = origin_rank;
+        
+                // Run the experiment with the updated config
+                run_simulation(&config, &matches, &mut gossip_stats_collection);
+            }
+        }
+        Testing::NoTest => {
+            run_simulation(&config, &matches, &mut gossip_stats_collection);
+        }
+    }
+
+    gossip_stats_collection.print_all(config.gossip_iterations, config.test_type);
 
 }
 

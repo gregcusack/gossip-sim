@@ -24,6 +24,69 @@ use {
 #[cfg_attr(test, cfg(test))]
 pub(crate) const CRDS_UNIQUE_PUBKEY_CAPACITY: usize = 8192;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Testing {
+    ActiveSetSize,
+    PushFanout,
+    MinIngressNodes,
+    MinStakeThreshold,
+    OriginRank,
+    NoTest,
+}
+
+impl std::fmt::Display for Testing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Testing::ActiveSetSize => write!(f, "ActiveSetSize"),
+            Testing::PushFanout => write!(f, "PushFanout()"),
+            Testing::MinIngressNodes => write!(f, "MinIngressNodes()"),
+            Testing::MinStakeThreshold => write!(f, "MinStakeThreshold()"),
+            Testing::OriginRank => write!(f, "OriginRank()"),
+            Testing::NoTest => write!(f, "NoTest()"),
+        }
+    }
+}
+
+impl FromStr for Testing {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "active-set-size" => Ok(Testing::ActiveSetSize),
+            "push-fanout" => Ok(Testing::PushFanout),
+            "min-ingress-nodes" => Ok(Testing::MinIngressNodes),
+            "min-stake-threshold" => Ok(Testing::MinStakeThreshold),
+            "origin-rank" => Ok(Testing::OriginRank),
+            "no-test" => Ok(Testing::NoTest),
+            _ => Err(format!("Invalid test type: {}", s)),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum StepSize {
+    Integer(usize),
+    Float(f64),
+}
+
+impl From<StepSize> for usize {
+    fn from(value: StepSize) -> Self {
+        match value {
+            StepSize::Integer(num) => num,
+            StepSize::Float(num) => num as usize,
+        }
+    }
+}
+
+impl From<StepSize> for f64 {
+    fn from(value: StepSize) -> Self {
+        match value {
+            StepSize::Integer(num) => num as f64,
+            StepSize::Float(num) => num,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Config<'a> {
     pub gossip_push_fanout: usize,
@@ -37,6 +100,9 @@ pub struct Config<'a> {
     pub min_ingress_nodes: usize,
     pub filter_zero_staked_nodes: bool,
     pub num_buckets_for_stranded_node_hist: u64,
+    pub test_type: Testing,
+    pub num_simulations: usize,
+    pub step_size: StepSize,
 }
 
 pub struct Cluster {
@@ -578,7 +644,6 @@ impl Cluster {
 
 
 }
-
 
 pub struct Node {
     _clock: Instant,
