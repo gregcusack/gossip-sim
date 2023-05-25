@@ -89,6 +89,39 @@ cargo run --bin gossip-sim --
     --num-buckets <num-buckets-for-histogram>
 ```
 
+#### Option 4: Pull accounts, run multiple simulations, change specific config param
+- This will pull all node accounts from mainnet and simulate the network.
+```
+cargo run --bin gossip-sim --
+    --push-fanout <push_fanout> 
+    --active-set-size <active_set_size> 
+    --iterations <number_of_gossip_iterations> 
+    --origin-rank <origin_stake_rank> 
+    --rotation-probability <probability-of-active-set-rotation> 
+    --min-ingress-nodes <min-ingress-nodes> 
+    --stake-threshold <min-stake-threshold>
+    --filter-zero-staked-nodes
+    --num-buckets <num-buckets-for-histogram>
+    --test-type <test-type>
+    --num-simulations <num-simulations>
+    --step-size <step-size>
+```
+`test-type` is an Enum that can be set to one of the following:
+```
+active-set-size
+push-fanout
+min-ingress-nodes
+min-stake-threshold
+origin-rank
+[default: no-test]
+```
+So if `test-type` is set to `active-set-size`, the first simulation will run gossip with an `active-set-size` of `--active-set-size <active_set_size>` passed in. 
+On each simulation run, the `active-set-size` will increment by `step-size`. 
+The number of times a simulation is run (and `active-set-size` incremented) is defined by `num-simulations`.
+Default if `test-type` is not set is `no-test`. Meaning everything will run just once as before (so would be same as Option 2 or Option 3 above)
+
+
+
 ## Interpreting the output
 Prints out coverage, RMR, Aggregate Hop info, LDH, stranded nodes
 - Coverage:

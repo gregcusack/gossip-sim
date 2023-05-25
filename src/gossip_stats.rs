@@ -1,11 +1,13 @@
 use {
     crate::{Stats, HopsStats},
     log::{info, error},
-    std::collections::{HashMap, BTreeMap},
+    std::collections::{HashMap, BTreeMap, HashSet},
     solana_sdk::pubkey::Pubkey,
+    crate::gossip::{Testing, StepSize, Config},
 };
 
 // stores stats about a single run of mst. 
+#[derive(Debug, Clone)]
 pub struct HopsStat {
     mean: HopsStats,
     median: HopsStats,
@@ -116,6 +118,7 @@ impl HopsStat {
 
 // if we run multiple MSTs, this will keep track of the hops
 // over the course of multiple runs.
+#[derive(Debug, Clone)]
 pub struct HopsStatCollection {
     per_round_stats: Vec<HopsStat>,
     raw_hop_collection: Vec<u64>, // all hop counts seen
@@ -185,32 +188,48 @@ impl HopsStatCollection {
     }
 }
 
-pub struct CoverageStatsCollection {
-    coverages: Vec<f64>,
+#[derive(Debug, Clone)]
+pub struct StatCollection {
+    collection: Vec<f64>,
     mean: Stats,
     median: Stats,
     max: Stats,
     min: Stats,
+    collection_type: String,
 }
 
-impl Default for CoverageStatsCollection {
+impl Default for StatCollection {
     fn default() -> Self {
         Self {
-            coverages: Vec::default(),
+            collection: Vec::default(),
             mean: Stats::Mean(0.0),
             median: Stats::Median(0.0),
             max: Stats::Max(0.0),
             min: Stats::Min(0.0),
+            collection_type: String::new(),
         }
     }
 }
 
-impl CoverageStatsCollection {
+impl StatCollection {
+    pub fn new(
+        collection_type: &str,
+    ) -> Self {
+        StatCollection {
+            collection: Vec::default(),
+            mean: Stats::Mean(0.0),
+            median: Stats::Median(0.0),
+            max: Stats::Max(0.0),
+            min: Stats::Min(0.0),
+            collection_type: String::from(collection_type),
+        }
+    }
+
     pub fn calculate_stats (
         &mut self,
     ) {
         // clone to maintain iteration order for print_stats
-        let mut sorted_coverages = self.coverages.clone();
+        let mut sorted_coverages = self.collection.clone();
         sorted_coverages
             .sort_by(|a, b| a
                     .partial_cmp(b)
@@ -265,20 +284,28 @@ impl CoverageStatsCollection {
         }
     }
 
+    pub fn get_stat_by_index(
+        &self,
+        index: usize,
+    ) -> &f64 {
+        &self.collection[index]
+    }
+
     pub fn print_stats (
         &self,
     ) {
-        info!("Number of iterations: {}", self.coverages.len());
-        info!("Coverage {}", self.mean);
-        info!("Coverage {}", self.median);
-        info!("Coverage {}", self.max);
-        info!("Coverage {}", self.min);
+        // info!("Number of iterations: {}", self.coverages.len());
+        info!("{} {}", self.collection_type, self.mean);
+        info!("{} {}", self.collection_type, self.median);
+        info!("{} {}", self.collection_type, self.max);
+        info!("{} {}", self.collection_type, self.min);
     }    
 }
 
 // RMR = m / (n - 1) - 1
 // m: total number of payload messages exchanged during gossip (push/prune)
 // n: total number of nodes that receive the message
+#[derive(Debug, Clone)]
 pub struct RelativeMessageRedundancy {
     m: u64,
     n: u64,
@@ -341,104 +368,7 @@ impl std::fmt::Display for RelativeMessageRedundancy {
     }
 }
 
-pub struct RelativeMessageRedundancyCollection {
-    rmrs: Vec<f64>,
-    mean: Stats,
-    median: Stats,
-    max: Stats,
-    min: Stats,
-}
-
-impl Default for RelativeMessageRedundancyCollection {
-    fn default() -> Self {
-        Self {
-            rmrs: Vec::default(),
-            mean: Stats::Mean(0.0),
-            median: Stats::Median(0.0),
-            max: Stats::Max(0.0),
-            min: Stats::Min(0.0),
-        }
-    }
-}
-
-impl RelativeMessageRedundancyCollection {
-    pub fn calculate_stats (
-        &mut self,
-    ) {
-        // clone to maintain iteration order for print_stats
-        let mut sorted_rms = self.rmrs.clone();
-        sorted_rms
-            .sort_by(|a, b| a
-                    .partial_cmp(b)
-                    .unwrap());
-        let len = sorted_rms.len();
-        let mean = sorted_rms
-            .iter()
-            .sum::<f64>() / len as f64;
-        let median = if len % 2 == 0 {
-            (sorted_rms[len / 2 - 1] + sorted_rms[len / 2]) / 2.0
-        } else {
-            sorted_rms[len / 2]
-        };
-        let max = *sorted_rms
-            .last()
-            .unwrap_or(&0.0);
-        let min = *sorted_rms
-            .first()
-            .unwrap_or(&0.0);
-
-        self.mean = Stats::Mean(mean);
-        self.median = Stats::Median(median);
-        self.max = Stats::Max(max);
-        self.min = Stats::Min(min);
-    }
-
-    pub fn get_rmr_by_index(
-        &self,
-        index: usize,
-    ) -> &f64 {
-        &self.rmrs[index]
-    }
-
-    pub fn mean(&self) -> f64 {
-        match &self.mean {
-            Stats::Mean(val) => *val,
-            _ => panic!("Unexpected value in mean field"),
-        }
-    }
-
-    pub fn max(&self) -> f64 {
-        match &self.max {
-            Stats::Max(val) => *val,
-            _ => panic!("Unexpected value in max field"),
-        }
-    }
-
-    pub fn min(&self) -> f64 {
-        match &self.min {
-            Stats::Min(val) => *val,
-            _ => panic!("Unexpected value in min field"),
-        }
-    }
-
-    pub fn median(&self) -> f64 {
-        match &self.median {
-            Stats::Median(val) => *val,
-            _ => panic!("Unexpected value in median field"),
-        }
-    }
-
-    pub fn print_stats (
-        &self,
-    ) {
-        info!("Number of iterations: {}", self.rmrs.len());
-        info!("RMR {}", self.mean);
-        info!("RMR {}", self.median);
-        info!("RMR {}", self.max);
-        info!("RMR {}", self.min);
-    }
-}
-
+#[derive(Debug, Clone)]
 pub struct Histogram {
     // histogram. buckets are stranded count.
     // amount in bucket is the number of nodes that were stranded that many times
@@ -521,7 +451,7 @@ impl Histogram {
 
 }
 
-
+#[derive(Debug)]
 pub struct StrandedNodeCollection {
     stranded_nodes: HashMap<Pubkey, (/* stake */u64, /* times stranded */ u64)>, 
     /*
@@ -574,6 +504,29 @@ impl Default for StrandedNodeCollection {
         }
     }
 }
+
+impl Clone for StrandedNodeCollection {
+    fn clone(&self) -> Self {
+        StrandedNodeCollection {
+            stranded_nodes: self.stranded_nodes.clone(),
+            total_gossip_iterations: self.total_gossip_iterations,
+            total_stranded_iterations: self.total_stranded_iterations,
+            mean_stranded_per_iteration: self.mean_stranded_per_iteration,
+            mean_standed_iterations_per_stranded_node: self.mean_standed_iterations_per_stranded_node,
+            median_standed_iterations_per_stranded_node: self.median_standed_iterations_per_stranded_node,
+            stranded_iterations_per_node: self.stranded_iterations_per_node,
+            total_nodes: self.total_nodes,
+            total_stranded_stake: self.total_stranded_stake,
+            stranded_node_mean_stake: self.stranded_node_mean_stake,
+            stranded_node_median_stake: self.stranded_node_median_stake,
+            stranded_node_max_stake: self.stranded_node_max_stake,
+            stranded_node_min_stake: self.stranded_node_min_stake,
+            histogram: self.histogram.clone(),
+        }
+    }
+}
+
+// impl Copy for StrandedNodeCollection {}
 
 impl StrandedNodeCollection {
     fn increment_stranded_count(
@@ -668,7 +621,7 @@ impl StrandedNodeCollection {
     }
 
     pub fn get_stranded_iterations_per_node(
-        &mut self,
+        &self,
     ) -> f64 {
         self.stranded_iterations_per_node
     }
@@ -774,25 +727,141 @@ impl StrandedNodeCollection {
 
 }
 
+#[derive(Debug, Clone)]
+pub struct BranchingFactor { }
+
+// NOTE: This will measure branching factor of all visited nodes
+// Does NOT include nodes that were not visited
+impl BranchingFactor {
+    pub fn calculate_outbound(
+        // &mut self,
+        pushes: &HashMap<Pubkey, HashSet<Pubkey>>,
+    ) -> f64 {
+        let total_nodes = pushes.len();
+        let mut outgoing_connections = 0;
+    
+        for destination in pushes.values() {
+            outgoing_connections += destination.len();
+        }
+    
+        if total_nodes > 0 {
+            outgoing_connections as f64 / total_nodes as f64
+        } else {
+            0.0 // 0 if the graph has no nodes
+        }
+    }
+
+    pub fn calculate_inbound(
+        orders: &HashMap<Pubkey, HashMap<Pubkey, u64>>,
+    ) -> f64 {
+        let total_nodes = orders.len();
+        let mut inbound_connections = 0;
+    
+        for source in orders.values() {
+            inbound_connections += source.len();
+        }
+    
+        if total_nodes > 0 {
+            inbound_connections as f64 / total_nodes as f64
+        } else {
+            // self.factor = 0.0 // 0 if the graph has no nodes
+            0.0 // 0 if the graph has no nodes
+        }
+    }
+
+
+}
+
+#[derive(Debug, Clone)]
+pub struct SimulationParamaters {
+    pub gossip_push_fanout: usize,
+    pub gossip_active_set_size: usize,
+    pub gossip_iterations: usize, 
+    pub origin_rank: usize,
+    pub probability_of_rotation: f64,
+    pub prune_stake_threshold: f64,
+    pub min_ingress_nodes: usize,
+    pub test_type: Testing,
+    pub num_simulations: usize,
+    pub step_size: StepSize,
+}
+
+impl Default for SimulationParamaters {
+    fn default() -> Self {
+        Self {
+            gossip_push_fanout: 0,
+            gossip_active_set_size: 0,
+            gossip_iterations: 0, 
+            origin_rank: 0,
+            probability_of_rotation: 0.0,
+            prune_stake_threshold: 0.0,
+            min_ingress_nodes: 0,
+            test_type: Testing::NoTest,
+            num_simulations: 0,
+            step_size: StepSize::Integer(0),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct GossipStats {
     hops_stats: HopsStatCollection,
-    coverage_stats: CoverageStatsCollection,
-    relative_message_redundancy_stats: RelativeMessageRedundancyCollection,
+    coverage_stats: StatCollection,
+    relative_message_redundancy_stats: StatCollection,
     stranded_nodes: StrandedNodeCollection,
+    outbound_branching_factors: StatCollection,
+    inbound_branching_factors: StatCollection,
+    origin: Pubkey,
+    pub simulation_parameters: SimulationParamaters,
 }
 
 impl Default for GossipStats {
     fn default() -> Self {
         GossipStats { 
             hops_stats: HopsStatCollection::default(), 
-            coverage_stats: CoverageStatsCollection::default(),
-            relative_message_redundancy_stats: RelativeMessageRedundancyCollection::default(),
+            coverage_stats: StatCollection::new("Coverage"),
+            relative_message_redundancy_stats: StatCollection::new("RMR"),
             stranded_nodes: StrandedNodeCollection::default(),
+            outbound_branching_factors: StatCollection::new("Outbound Branching Factor"),
+            inbound_branching_factors: StatCollection::new("Inbound Branching Factor"),
+            origin: Pubkey::default(),
+            simulation_parameters: SimulationParamaters::default(),
         }
     }
 }
 
 impl GossipStats {
+    pub fn set_origin(
+        &mut self,
+        origin: Pubkey,
+    ) {
+        self.origin = origin;
+    }
+
+    pub fn origin(
+        &self,
+    ) -> Pubkey {
+        self.origin
+    }
+
+    pub fn set_simulation_parameters(
+        &mut self,
+        config: &Config,
+    ) {
+        self.simulation_parameters = SimulationParamaters {
+            gossip_push_fanout: config.gossip_push_fanout,
+            gossip_active_set_size: config.gossip_active_set_size,
+            origin_rank: config.origin_rank,
+            gossip_iterations: config.gossip_iterations,
+            probability_of_rotation: config.probability_of_rotation,
+            prune_stake_threshold: config.prune_stake_threshold,
+            min_ingress_nodes: config.min_ingress_nodes, 
+            test_type: config.test_type,
+            num_simulations: config.num_simulations,
+            step_size: config.step_size,
+        }  
+    }
+
     pub fn insert_hops_stat(
         &mut self,
         distances: &HashMap<Pubkey, u64>,
@@ -838,7 +907,7 @@ impl GossipStats {
     }
 
     pub fn print_aggregate_hop_stats(
-        &mut self,
+        &self,
     ) {
         info!("|---------------------------------|");
         info!("|------ AGGREGATE HOP STATS ------|");
@@ -868,16 +937,16 @@ impl GossipStats {
     }
 
     pub fn print_last_delivery_hop_stats(
-        &mut self,
+        &self,
     ) {
         info!("|-------------------------------------|");
         info!("|------ LAST DELIVERY HOP STATS ------|");
         info!("|-------------------------------------|");     
         let stats = self.hops_stats.get_last_delivery_hop_stats();
-        info!("LDH Mean: {}", stats.mean);
-        info!("LDH Median: {}", stats.median);
-        info!("LDH Max: {}", stats.max);
-        info!("LDH Min: {}", stats.min);
+        info!("LDH {}", stats.mean);
+        info!("LDH {}", stats.median);
+        info!("LDH {}", stats.max);
+        info!("LDH {}", stats.min);
     }
 
     pub fn get_last_delivery_hop_stats(
@@ -897,7 +966,7 @@ impl GossipStats {
         &mut self,
         value: f64,
     ) {
-        self.coverage_stats.coverages.push(value);
+        self.coverage_stats.collection.push(value);
     }
 
     pub fn calculate_coverage_stats(
@@ -930,7 +999,7 @@ impl GossipStats {
         &mut self,
         rmr: f64,
     ) {
-        self.relative_message_redundancy_stats.rmrs.push(rmr);
+        self.relative_message_redundancy_stats.collection.push(rmr);
     }
 
     pub fn calculate_rmr_stats(
@@ -943,7 +1012,7 @@ impl GossipStats {
         &self,
         index: usize,
     ) -> &f64 {
-        self.relative_message_redundancy_stats.get_rmr_by_index(index)
+        self.relative_message_redundancy_stats.get_stat_by_index(index)
     }
 
     pub fn get_rmr_stats(
@@ -1031,7 +1100,7 @@ impl GossipStats {
     }
 
     pub fn print_stranded_stats(
-        &mut self,
+        &self,
     ) {
         info!("|-----------------------------|");
         info!("|---- STRANDED NODE STATS ----|");
@@ -1080,30 +1149,133 @@ impl GossipStats {
         }
     }
 
-    pub fn print_all(
+    pub fn print_branching_factor_stats(
+        &self,
+    ) {
+        info!("|-----------------------------------|");
+        info!("|---- OUTBOUND BRANCHING FACTOR ----|");
+        info!("|-----------------------------------|"); 
+        self.outbound_branching_factors.print_stats();
+        info!("|----------------------------------|");
+        info!("|---- INBOUND BRANCHING FACTOR ----|");
+        info!("|----------------------------------|"); 
+        self.inbound_branching_factors.print_stats();
+    }
+
+    pub fn calculate_outbound_branching_factor(
         &mut self,
-        num_buckets: u64
+        pushes: &HashMap<Pubkey, HashSet<Pubkey>>,
+    ) {
+        self.outbound_branching_factors
+            .collection
+            .push(
+                BranchingFactor::calculate_outbound(pushes));
+
+    }
+
+    pub fn calculate_inbound_branching_factor(
+        &mut self,
+        orders: &HashMap<Pubkey, HashMap<Pubkey, u64>>,
+    ) {
+        self.inbound_branching_factors
+        .collection
+            .push(
+                BranchingFactor::calculate_inbound(orders));
+
+    }
+
+    pub fn calculate_branching_factor_stats(
+        &mut self,
+    ) {
+        self.outbound_branching_factors.calculate_stats();
+        self.inbound_branching_factors.calculate_stats();
+    }
+
+    pub fn run_all_calculations(
+        &mut self,
+        num_buckets: u64,
     ) {
         self.calculate_coverage_stats();
-        self.print_coverage_stats();
-
         self.calculate_rmr_stats();
-        self.print_rmr_stats();
-
         self.calculate_aggregate_hop_stats();
-        self.print_aggregate_hop_stats();
-
         self.calculate_last_delivery_hop_stats();
-        self.print_last_delivery_hop_stats();
-
         self.calculate_stranded_stats();
-        self.print_stranded_stats();
-
         self.build_stranded_node_histogram(num_buckets);
-        self.print_stranded_node_histogram();
+        self.calculate_branching_factor_stats();
 
+    }
+
+    pub fn print_all(
+        &self,
+    ) {
+        self.print_coverage_stats();
+        self.print_rmr_stats();
+        self.print_aggregate_hop_stats();
+        self.print_last_delivery_hop_stats();
+        self.print_stranded_stats();
+        self.print_stranded_node_histogram();
         self.print_stranded();
+        self.print_branching_factor_stats();
         // self.print_hops_stats();
+    }
+}
+
+pub struct GossipStatsCollection {
+    gossip_stats_collection: Vec<GossipStats>,
+    num_sims: usize,
+    origin: Pubkey,
+}
+
+impl Default for GossipStatsCollection {
+    fn default() -> Self {
+        GossipStatsCollection { 
+            gossip_stats_collection: Vec::default(),
+            num_sims: 0,
+            origin: Pubkey::default(),
+        }
+    }
+}
+
+impl GossipStatsCollection {
+    pub fn set_number_of_simulations(
+        &mut self,
+        num_sims: usize,
+    ) {
+        self.num_sims = num_sims;
+    }
+
+    pub fn set_origin(
+        &mut self,
+        origin: Pubkey
+    ) {
+        if origin == Pubkey::default() {
+            self.origin = origin;
+        }
+    }
+
+    pub fn push (
+        &mut self,
+        gossip_stat: GossipStats,
+    ) {
+        self.gossip_stats_collection.push(gossip_stat);
+    }
+
+    pub fn print_all(
+        &self,
+        gossip_iterations: usize,
+        test_type: Testing,
+    ) {
+        info!("|----------------------------------------------------------|");
+        info!("|--- GOSSIP STATS COLLECTION ACROSS ALL {} SIMULATION(S) ---|", self.num_sims);
+        info!("|--- Gossip Iterations: {} ", gossip_iterations);
+        info!("|--- Test Type: {} ", test_type);
+        info!("|----------------------------------------------------------|"); 
+        for (iteration, stat) in self.gossip_stats_collection.iter().enumerate() {
+            info!("|#######################################################################################|");
+            info!("Simulation Iteration: {}, Origin: {}", iteration, stat.origin());
+            info!("{:#?}", stat.simulation_parameters);
+            stat.print_all()
+        }
     }
 }
 

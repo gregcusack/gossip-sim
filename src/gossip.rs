@@ -24,6 +24,69 @@ use {
 #[cfg_attr(test, cfg(test))]
 pub(crate) const CRDS_UNIQUE_PUBKEY_CAPACITY: usize = 8192;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Testing {
+    ActiveSetSize,
+    PushFanout,
+    MinIngressNodes,
+    MinStakeThreshold,
+    OriginRank,
+    NoTest,
+}
+
+impl std::fmt::Display for Testing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Testing::ActiveSetSize => write!(f, "ActiveSetSize"),
+            Testing::PushFanout => write!(f, "PushFanout()"),
+            Testing::MinIngressNodes => write!(f, "MinIngressNodes()"),
+            Testing::MinStakeThreshold => write!(f, "MinStakeThreshold()"),
+            Testing::OriginRank => write!(f, "OriginRank()"),
+            Testing::NoTest => write!(f, "NoTest()"),
+        }
+    }
+}
+
+impl FromStr for Testing {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "active-set-size" => Ok(Testing::ActiveSetSize),
+            "push-fanout" => Ok(Testing::PushFanout),
+            "min-ingress-nodes" => Ok(Testing::MinIngressNodes),
+            "min-stake-threshold" => Ok(Testing::MinStakeThreshold),
+            "origin-rank" => Ok(Testing::OriginRank),
+            "no-test" => Ok(Testing::NoTest),
+            _ => Err(format!("Invalid test type: {}", s)),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum StepSize {
+    Integer(usize),
+    Float(f64),
+}
+
+impl From<StepSize> for usize {
+    fn from(value: StepSize) -> Self {
+        match value {
+            StepSize::Integer(num) => num,
+            StepSize::Float(num) => num as usize,
+        }
+    }
+}
+
+impl From<StepSize> for f64 {
+    fn from(value: StepSize) -> Self {
+        match value {
+            StepSize::Integer(num) => num as f64,
+            StepSize::Float(num) => num,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Config<'a> {
     pub gossip_push_fanout: usize,
@@ -37,6 +100,9 @@ pub struct Config<'a> {
     pub min_ingress_nodes: usize,
     pub filter_zero_staked_nodes: bool,
     pub num_buckets_for_stranded_node_hist: u64,
+    pub test_type: Testing,
+    pub num_simulations: usize,
+    pub step_size: StepSize,
 }
 
 pub struct Cluster {
@@ -170,7 +236,7 @@ impl Cluster {
             .len()
     }
 
-    pub fn get_orders(
+    pub fn get_orders_hops(
         &self,
         dest_node: &Pubkey,
         src_node: &Pubkey,
@@ -179,6 +245,12 @@ impl Cluster {
             .get(dest_node)
             .unwrap()
             .get(src_node)
+    }
+
+    pub fn get_orders(
+        &self,
+    ) -> &HashMap<Pubkey, HashMap<Pubkey, u64>> {
+        &self.orders
     }
 
     pub fn get_visited_len(
@@ -276,6 +348,12 @@ impl Cluster {
                 info!("Prunee: {:?}", prunee);
             }
         }
+    }
+
+    pub fn get_pushes(
+        &self,
+    ) -> &HashMap<Pubkey, HashSet<Pubkey>> {
+        &self.pushes
     }
 
     pub fn print_pushes(
@@ -389,6 +467,9 @@ impl Cluster {
                     // }
 
                     // add neighbor to current_node pushes map
+                    // I think this is the one we care about at all times.
+                    // TBH not sure MST is really useful. 
+                    // We care about who a node is pushing too.
                     self.pushes
                         .get_mut(&current_node_pubkey)
                         .unwrap()
@@ -578,7 +659,6 @@ impl Cluster {
 
 
 }
-
 
 pub struct Node {
     _clock: Instant,
@@ -900,25 +980,25 @@ mod tests {
         
         // check num of hops per inbound connection
         // M
-        assert_eq!(cluster.get_orders(&nodes[0].pubkey(), &nodes[1].pubkey()).unwrap(), &4u64); // M <- h, 4 hops
-        assert_eq!(cluster.get_orders(&nodes[0].pubkey(), &nodes[4].pubkey()).unwrap(), &2u64); // M <- j, 2 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[0].pubkey(), &nodes[1].pubkey()).unwrap(), &4u64); // M <- h, 4 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[0].pubkey(), &nodes[4].pubkey()).unwrap(), &2u64); // M <- j, 2 hops
 
         // h
-        assert_eq!(cluster.get_orders(&nodes[1].pubkey(), &nodes[0].pubkey()).unwrap(), &3u64); // h <- M, 3 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[1].pubkey(), &nodes[0].pubkey()).unwrap(), &3u64); // h <- M, 3 hops
 
         // 3 
-        assert_eq!(cluster.get_orders(&nodes[2].pubkey(), &nodes[0].pubkey()).unwrap(), &3u64); // 3 <- M, 3 hops
-        assert_eq!(cluster.get_orders(&nodes[2].pubkey(), &nodes[3].pubkey()).unwrap(), &3u64); // 3 <- P, 3 hops
-        assert_eq!(cluster.get_orders(&nodes[2].pubkey(), &nodes[5].pubkey()).unwrap(), &1u64); // 3 <- 5, 1 hop
+        assert_eq!(cluster.get_orders_hops(&nodes[2].pubkey(), &nodes[0].pubkey()).unwrap(), &3u64); // 3 <- M, 3 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[2].pubkey(), &nodes[3].pubkey()).unwrap(), &3u64); // 3 <- P, 3 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[2].pubkey(), &nodes[5].pubkey()).unwrap(), &1u64); // 3 <- 5, 1 hop
 
         // P
-        assert_eq!(cluster.get_orders(&nodes[0].pubkey(), &nodes[1].pubkey()).unwrap(), &4u64); // M <- h, 4 hops
-        assert_eq!(cluster.get_orders(&nodes[0].pubkey(), &nodes[4].pubkey()).unwrap(), &2u64); // M <- j, 2 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[0].pubkey(), &nodes[1].pubkey()).unwrap(), &4u64); // M <- h, 4 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[0].pubkey(), &nodes[4].pubkey()).unwrap(), &2u64); // M <- j, 2 hops
 
         // j
-        assert_eq!(cluster.get_orders(&nodes[4].pubkey(), &nodes[2].pubkey()).unwrap(), &2u64); // j <- 3, 2 hops
-        assert_eq!(cluster.get_orders(&nodes[4].pubkey(), &nodes[3].pubkey()).unwrap(), &3u64); // j <- P, 3 hops
-        assert_eq!(cluster.get_orders(&nodes[4].pubkey(), &nodes[5].pubkey()).unwrap(), &1u64); // j <- 5, 1 hop
+        assert_eq!(cluster.get_orders_hops(&nodes[4].pubkey(), &nodes[2].pubkey()).unwrap(), &2u64); // j <- 3, 2 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[4].pubkey(), &nodes[3].pubkey()).unwrap(), &3u64); // j <- P, 3 hops
+        assert_eq!(cluster.get_orders_hops(&nodes[4].pubkey(), &nodes[5].pubkey()).unwrap(), &1u64); // j <- 5, 1 hop
 
         // 5 - None
         // ensure origin is NOT in the orders map
