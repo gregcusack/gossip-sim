@@ -189,32 +189,47 @@ impl HopsStatCollection {
 }
 
 #[derive(Debug, Clone)]
-pub struct CoverageStatsCollection {
-    coverages: Vec<f64>,
+pub struct StatCollection {
+    collection: Vec<f64>,
     mean: Stats,
     median: Stats,
     max: Stats,
     min: Stats,
+    collection_type: String,
 }
 
-impl Default for CoverageStatsCollection {
+impl Default for StatCollection {
     fn default() -> Self {
         Self {
-            coverages: Vec::default(),
+            collection: Vec::default(),
             mean: Stats::Mean(0.0),
             median: Stats::Median(0.0),
             max: Stats::Max(0.0),
             min: Stats::Min(0.0),
+            collection_type: String::new(),
         }
     }
 }
 
-impl CoverageStatsCollection {
+impl StatCollection {
+    pub fn new(
+        collection_type: &str,
+    ) -> Self {
+        StatCollection {
+            collection: Vec::default(),
+            mean: Stats::Mean(0.0),
+            median: Stats::Median(0.0),
+            max: Stats::Max(0.0),
+            min: Stats::Min(0.0),
+            collection_type: String::from(collection_type),
+        }
+    }
+
     pub fn calculate_stats (
         &mut self,
     ) {
         // clone to maintain iteration order for print_stats
-        let mut sorted_coverages = self.coverages.clone();
+        let mut sorted_coverages = self.collection.clone();
         sorted_coverages
             .sort_by(|a, b| a
                     .partial_cmp(b)
@@ -269,14 +284,21 @@ impl CoverageStatsCollection {
         }
     }
 
+    pub fn get_stat_by_index(
+        &self,
+        index: usize,
+    ) -> &f64 {
+        &self.collection[index]
+    }
+
     pub fn print_stats (
         &self,
     ) {
         // info!("Number of iterations: {}", self.coverages.len());
-        info!("Coverage {}", self.mean);
-        info!("Coverage {}", self.median);
-        info!("Coverage {}", self.max);
-        info!("Coverage {}", self.min);
+        info!("{} {}", self.collection_type, self.mean);
+        info!("{} {}", self.collection_type, self.median);
+        info!("{} {}", self.collection_type, self.max);
+        info!("{} {}", self.collection_type, self.min);
     }    
 }
 
@@ -343,105 +365,6 @@ impl RelativeMessageRedundancy {
 impl std::fmt::Display for RelativeMessageRedundancy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "m: {}, n: {}, rmr: {:.6}", self.m, self.n, self.rmr)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct RelativeMessageRedundancyCollection {
-    rmrs: Vec<f64>,
-    mean: Stats,
-    median: Stats,
-    max: Stats,
-    min: Stats,
-}
-
-impl Default for RelativeMessageRedundancyCollection {
-    fn default() -> Self {
-        Self {
-            rmrs: Vec::default(),
-            mean: Stats::Mean(0.0),
-            median: Stats::Median(0.0),
-            max: Stats::Max(0.0),
-            min: Stats::Min(0.0),
-        }
-    }
-}
-
-impl RelativeMessageRedundancyCollection {
-    pub fn calculate_stats (
-        &mut self,
-    ) {
-        // clone to maintain iteration order for print_stats
-        let mut sorted_rms = self.rmrs.clone();
-        sorted_rms
-            .sort_by(|a, b| a
-                    .partial_cmp(b)
-                    .unwrap());
-        let len = sorted_rms.len();
-        let mean = sorted_rms
-            .iter()
-            .sum::<f64>() / len as f64;
-        let median = if len % 2 == 0 {
-            (sorted_rms[len / 2 - 1] + sorted_rms[len / 2]) / 2.0
-        } else {
-            sorted_rms[len / 2]
-        };
-        let max = *sorted_rms
-            .last()
-            .unwrap_or(&0.0);
-        let min = *sorted_rms
-            .first()
-            .unwrap_or(&0.0);
-
-        self.mean = Stats::Mean(mean);
-        self.median = Stats::Median(median);
-        self.max = Stats::Max(max);
-        self.min = Stats::Min(min);
-    }
-
-    pub fn get_rmr_by_index(
-        &self,
-        index: usize,
-    ) -> &f64 {
-        &self.rmrs[index]
-    }
-
-    pub fn mean(&self) -> f64 {
-        match &self.mean {
-            Stats::Mean(val) => *val,
-            _ => panic!("Unexpected value in mean field"),
-        }
-    }
-
-    pub fn max(&self) -> f64 {
-        match &self.max {
-            Stats::Max(val) => *val,
-            _ => panic!("Unexpected value in max field"),
-        }
-    }
-
-    pub fn min(&self) -> f64 {
-        match &self.min {
-            Stats::Min(val) => *val,
-            _ => panic!("Unexpected value in min field"),
-        }
-    }
-
-    pub fn median(&self) -> f64 {
-        match &self.median {
-            Stats::Median(val) => *val,
-            _ => panic!("Unexpected value in median field"),
-        }
-    }
-
-    pub fn print_stats (
-        &self,
-    ) {
-        // info!("Number of iterations: {}", self.rmrs.len());
-        info!("RMR {}", self.mean);
-        info!("RMR {}", self.median);
-        info!("RMR {}", self.max);
-        info!("RMR {}", self.min);
     }
 }
 
@@ -805,17 +728,7 @@ impl StrandedNodeCollection {
 }
 
 #[derive(Debug, Clone)]
-pub struct BranchingFactor {
-    // factor: f64,
-}
-
-// impl Default for BranchingFactor {
-//     fn default() -> Self {
-//         Self {
-//             factor: 0.0,
-//         }
-//     }
-// }
+pub struct BranchingFactor { }
 
 // NOTE: This will measure branching factor of all visited nodes
 // Does NOT include nodes that were not visited
@@ -860,107 +773,6 @@ impl BranchingFactor {
 }
 
 #[derive(Debug, Clone)]
-pub struct BranchingFactorCollection {
-    factors: Vec<f64>,
-    mean: Stats,
-    median: Stats,
-    max: Stats,
-    min: Stats,
-}
-
-impl Default for BranchingFactorCollection {
-    fn default() -> Self {
-        Self {
-            factors: Vec::default(),
-            mean: Stats::Mean(0.0),
-            median: Stats::Median(0.0),
-            max: Stats::Max(0.0),
-            min: Stats::Min(0.0),
-        }
-    }
-}
-
-impl BranchingFactorCollection {
-    pub fn push(
-        &mut self,
-        factor: f64,
-    ) {
-        self.factors.push(factor);
-    }
-
-    pub fn calculate_stats (
-        &mut self,
-    ) {
-        // clone to maintain iteration order for print_stats
-        let mut sorted_factors = self.factors.clone();
-        sorted_factors
-            .sort_by(|a, b| a
-                    .partial_cmp(b)
-                    .unwrap());
-        let len = sorted_factors.len();
-        let mean = sorted_factors
-            .iter()
-            .sum::<f64>() / len as f64;
-        let median = if len % 2 == 0 {
-            (sorted_factors[len / 2 - 1] + sorted_factors[len / 2]) / 2.0
-        } else {
-            sorted_factors[len / 2]
-        };
-        let max = *sorted_factors
-            .last()
-            .unwrap_or(&0.0);
-        let min = *sorted_factors
-            .first()
-            .unwrap_or(&0.0);
-
-        self.mean = Stats::Mean(mean);
-        self.median = Stats::Median(median);
-        self.max = Stats::Max(max);
-        self.min = Stats::Min(min);
-    }
-
-    pub fn mean(&self) -> f64 {
-        match &self.mean {
-            Stats::Mean(val) => *val,
-            _ => panic!("Unexpected value in mean field"),
-        }
-    }
-
-    pub fn max(&self) -> f64 {
-        match &self.max {
-            Stats::Max(val) => *val,
-            _ => panic!("Unexpected value in max field"),
-        }
-    }
-
-    pub fn min(&self) -> f64 {
-        match &self.min {
-            Stats::Min(val) => *val,
-            _ => panic!("Unexpected value in min field"),
-        }
-    }
-
-    pub fn median(&self) -> f64 {
-        match &self.median {
-            Stats::Median(val) => *val,
-            _ => panic!("Unexpected value in median field"),
-        }
-    }
-
-    pub fn print_stats (
-        &self,
-        direction: &str,
-    ) {
-        // info!("Number of iterations: {}", self.coverages.len());
-        info!("{} Branching Factor: {}", direction, self.mean);
-        info!("{} Branching Factor: {}", direction, self.median);
-        info!("{} Branching Factor: {}", direction, self.max);
-        info!("{} Branching Factor: {}", direction, self.min);
-    }   
-}
-
-
-#[derive(Debug, Clone)]
 pub struct SimulationParamaters {
     pub gossip_push_fanout: usize,
     pub gossip_active_set_size: usize,
@@ -994,11 +806,11 @@ impl Default for SimulationParamaters {
 #[derive(Debug, Clone)]
 pub struct GossipStats {
     hops_stats: HopsStatCollection,
-    coverage_stats: CoverageStatsCollection,
-    relative_message_redundancy_stats: RelativeMessageRedundancyCollection,
+    coverage_stats: StatCollection,
+    relative_message_redundancy_stats: StatCollection,
     stranded_nodes: StrandedNodeCollection,
-    outbound_branching_factors: BranchingFactorCollection,
-    inbound_branching_factors: BranchingFactorCollection,
+    outbound_branching_factors: StatCollection,
+    inbound_branching_factors: StatCollection,
     origin: Pubkey,
     pub simulation_parameters: SimulationParamaters,
 }
@@ -1007,11 +819,11 @@ impl Default for GossipStats {
     fn default() -> Self {
         GossipStats { 
             hops_stats: HopsStatCollection::default(), 
-            coverage_stats: CoverageStatsCollection::default(),
-            relative_message_redundancy_stats: RelativeMessageRedundancyCollection::default(),
+            coverage_stats: StatCollection::new("Coverage"),
+            relative_message_redundancy_stats: StatCollection::new("RMR"),
             stranded_nodes: StrandedNodeCollection::default(),
-            outbound_branching_factors: BranchingFactorCollection::default(),
-            inbound_branching_factors: BranchingFactorCollection::default(),
+            outbound_branching_factors: StatCollection::new("Outbound Branching Factor"),
+            inbound_branching_factors: StatCollection::new("Inbound Branching Factor"),
             origin: Pubkey::default(),
             simulation_parameters: SimulationParamaters::default(),
         }
@@ -1131,10 +943,10 @@ impl GossipStats {
         info!("|------ LAST DELIVERY HOP STATS ------|");
         info!("|-------------------------------------|");     
         let stats = self.hops_stats.get_last_delivery_hop_stats();
-        info!("LDH Mean: {}", stats.mean);
-        info!("LDH Median: {}", stats.median);
-        info!("LDH Max: {}", stats.max);
-        info!("LDH Min: {}", stats.min);
+        info!("LDH {}", stats.mean);
+        info!("LDH {}", stats.median);
+        info!("LDH {}", stats.max);
+        info!("LDH {}", stats.min);
     }
 
     pub fn get_last_delivery_hop_stats(
@@ -1154,7 +966,7 @@ impl GossipStats {
         &mut self,
         value: f64,
     ) {
-        self.coverage_stats.coverages.push(value);
+        self.coverage_stats.collection.push(value);
     }
 
     pub fn calculate_coverage_stats(
@@ -1187,7 +999,7 @@ impl GossipStats {
         &mut self,
         rmr: f64,
     ) {
-        self.relative_message_redundancy_stats.rmrs.push(rmr);
+        self.relative_message_redundancy_stats.collection.push(rmr);
     }
 
     pub fn calculate_rmr_stats(
@@ -1200,7 +1012,7 @@ impl GossipStats {
         &self,
         index: usize,
     ) -> &f64 {
-        self.relative_message_redundancy_stats.get_rmr_by_index(index)
+        self.relative_message_redundancy_stats.get_stat_by_index(index)
     }
 
     pub fn get_rmr_stats(
@@ -1343,11 +1155,11 @@ impl GossipStats {
         info!("|-----------------------------------|");
         info!("|---- OUTBOUND BRANCHING FACTOR ----|");
         info!("|-----------------------------------|"); 
-        self.outbound_branching_factors.print_stats("Outbound");
+        self.outbound_branching_factors.print_stats();
         info!("|----------------------------------|");
         info!("|---- INBOUND BRANCHING FACTOR ----|");
         info!("|----------------------------------|"); 
-        self.inbound_branching_factors.print_stats("Inbound");
+        self.inbound_branching_factors.print_stats();
     }
 
     pub fn calculate_outbound_branching_factor(
@@ -1355,6 +1167,7 @@ impl GossipStats {
         pushes: &HashMap<Pubkey, HashSet<Pubkey>>,
     ) {
         self.outbound_branching_factors
+            .collection
             .push(
                 BranchingFactor::calculate_outbound(pushes));
 
@@ -1365,6 +1178,7 @@ impl GossipStats {
         orders: &HashMap<Pubkey, HashMap<Pubkey, u64>>,
     ) {
         self.inbound_branching_factors
+        .collection
             .push(
                 BranchingFactor::calculate_inbound(orders));
 

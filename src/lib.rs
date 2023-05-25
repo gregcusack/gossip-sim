@@ -82,12 +82,3 @@ pub fn get_json_rpc_url(json_rpc_url: &str) -> &str {
         _ => json_rpc_url,
     }
 }
-
-// trait Statistics<T> {
-//     fn calculate_stats(
-//         &mut self,
-//         stats: &[T],
-//     ) {
-
-//     }
-// }
