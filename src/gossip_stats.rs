@@ -479,6 +479,16 @@ pub struct StrandedNodeCollection {
     stranded_node_max_stake: u64,
     stranded_node_min_stake: u64,
 
+    // Info about the stake of stranded nodes
+    // For mean and median stake of stranded nodes, 
+    // each time a node is stranded it’s stake should be added to the total stake stranded. 
+    // So if a node with stake 100 is stranded 50 times. 100 should be added into the stranded stake 50 times. 
+    // ensures that a highly staked node only stranded once doesn't affect the mean/median as equally as 
+    // a low staked node stranded 100 times
+    weighted_total_stranded_stake: u64,
+    weighted_stranded_node_mean_stake: f64,
+    weighted_stranded_node_median_stake: f64,
+
     // // histogram. buckets are stranded count.
     // // amount in bucket is the number of nodes that were stranded that many times
     histogram: Histogram,
@@ -499,7 +509,10 @@ impl Default for StrandedNodeCollection {
             stranded_node_mean_stake: 0.0,
             stranded_node_median_stake: 0.0,
             stranded_node_max_stake: 0,
-            stranded_node_min_stake: 0,   
+            stranded_node_min_stake: 0,  
+            weighted_total_stranded_stake: 0,
+            weighted_stranded_node_mean_stake: 0.0,
+            weighted_stranded_node_median_stake: 0.0, 
             histogram: Histogram::default(),    
         }
     }
@@ -521,6 +534,10 @@ impl Clone for StrandedNodeCollection {
             stranded_node_median_stake: self.stranded_node_median_stake,
             stranded_node_max_stake: self.stranded_node_max_stake,
             stranded_node_min_stake: self.stranded_node_min_stake,
+
+            weighted_total_stranded_stake: self.weighted_total_stranded_stake,
+            weighted_stranded_node_mean_stake: self.weighted_stranded_node_mean_stake,
+            weighted_stranded_node_median_stake: self.weighted_stranded_node_median_stake,
             histogram: self.histogram.clone(),
         }
     }
@@ -554,25 +571,36 @@ impl StrandedNodeCollection {
     ) {
         self.total_stranded_iterations = 0;
         self.total_stranded_stake = 0;
+        self.weighted_total_stranded_stake = 0;
         let mut stranded_iteration_counts: Vec<u64> = Vec::new();
         let mut stranded_stakes: Vec<u64> = Vec::new();
+        let mut weighted_stranded_stakes: Vec<u64> = Vec::new();
 
         for (_, (stake, times_stranded)) in self.stranded_nodes.iter() {
             self.total_stranded_iterations += times_stranded;
             stranded_iteration_counts.push(*times_stranded);
 
             self.total_stranded_stake += stake;
+            self.weighted_total_stranded_stake += stake * times_stranded;
             stranded_stakes.push(*stake);
+            for _ in 0..*times_stranded {
+                weighted_stranded_stakes.push(*stake);
+            }
+            
         }
 
         self.mean_stranded_per_iteration = self.total_stranded_iterations as f64 / self.total_gossip_iterations as f64;
         self.stranded_node_mean_stake = self.total_stranded_stake as f64 / self.stranded_count() as f64;
         self.mean_standed_iterations_per_stranded_node = self.total_stranded_iterations as f64 / self.stranded_count() as f64;
 
+
+        self.weighted_stranded_node_mean_stake = self.weighted_total_stranded_stake as f64 / self.total_stranded_iterations as f64;
+
         // info!("stranded count, total gossip iters: {}, {}", self.stranded_count(), self.total_gossip_iterations);
 
         stranded_iteration_counts.sort();
         stranded_stakes.sort();
+        weighted_stranded_stakes.sort();
 
         self.median_standed_iterations_per_stranded_node = if stranded_iteration_counts.is_empty() {
             0.0
@@ -594,6 +622,16 @@ impl StrandedNodeCollection {
         } else {
             stranded_stakes[stranded_stakes.len() / 2] as f64
         };
+
+        self.weighted_stranded_node_median_stake = if weighted_stranded_stakes.is_empty() {
+            0.0
+        } else if weighted_stranded_stakes.len() % 2 == 0 {
+            let mid = weighted_stranded_stakes.len() / 2;
+            (weighted_stranded_stakes[mid - 1] + weighted_stranded_stakes[mid]) as f64 / 2.0
+        } else {
+            weighted_stranded_stakes[weighted_stranded_stakes.len() / 2] as f64
+        };
+
 
         self.stranded_node_max_stake = *stranded_stakes
             .last()
@@ -680,6 +718,15 @@ impl StrandedNodeCollection {
             self.stranded_node_median_stake, 
             self.stranded_node_max_stake, 
             self.stranded_node_min_stake
+        )
+    }
+
+    pub fn get_weighted_stranded_stake_stats(
+        &self,
+    ) -> (f64, f64) {
+        (
+            self.weighted_stranded_node_mean_stake, 
+            self.weighted_stranded_node_median_stake, 
         )
     }
 
@@ -1065,7 +1112,7 @@ impl GossipStats {
         }
     }
 
-    // must call: calculate_stranded_stats() calling this method
+    // must call: calculate_stranded_stats() before calling this method
     pub fn get_stranded_stats(
         &mut self,
     ) -> (
@@ -1078,8 +1125,11 @@ impl GossipStats {
         f64, // median stake of stranded nodes
         u64, // max stake of stranded nodes
         u64, // min stake of stranded nodes
+        f64, // weighted mean stake of stranded nodes
+        f64, // weighted median stake of stranded nodes
     ) {
         let stake_stats = self.stranded_nodes.get_stranded_stake_stats();
+        let weighted_stake_stats = self.stranded_nodes.get_weighted_stranded_stake_stats();
         (
             self.stranded_nodes.get_total_stranded_iterations(),
             self.stranded_nodes.get_stranded_iterations_per_node(),
@@ -1090,8 +1140,11 @@ impl GossipStats {
             stake_stats.1, 
             stake_stats.2, 
             stake_stats.3, 
+            weighted_stake_stats.0,
+            weighted_stake_stats.1,
         )
     }
+
 
     pub fn calculate_stranded_stats(
         &mut self,
@@ -1125,6 +1178,10 @@ impl GossipStats {
         info!("Median stake: {}", stake_stats.1);
         info!("Max stake: {}", stake_stats.2);
         info!("Min stake: {}", stake_stats.3);
+
+        let weighted_stake_stakes = self.stranded_nodes.get_weighted_stranded_stake_stats();
+        info!("Mean Weighted stake: {:.2}", weighted_stake_stakes.0);
+        info!("Median Weighted stake: {}", weighted_stake_stakes.1);
     }
 
     pub fn build_stranded_node_histogram(
@@ -1361,6 +1418,8 @@ mod tests {
         assert_eq!(stranded_stats.6, 724161057685112.0);
         assert_eq!(stranded_stats.7, 1017190976849038);
         assert_eq!(stranded_stats.8, 114555416102223);
+        assert_eq!(stranded_stats.9, 645017127080371.25);
+        assert_eq!(stranded_stats.10, 724161057685112.0);
 
         for _ in 0..4 {
             stranded_nodes.push(Pubkey::from_str("11111113R2cuenjG5nFubqX9Wzuukdin2YfGQVzu5").unwrap());
@@ -1388,6 +1447,8 @@ mod tests {
         assert_eq!(stranded_stats.6, 623567922929968.5);
         assert_eq!(stranded_stats.7, 1017190976849038);
         assert_eq!(stranded_stats.8, 114555416102223);
+        assert_eq!(stranded_stats.9, 615709255382738.9);
+        assert_eq!(stranded_stats.10, 585038762479069.0);
     }
 
     #[test]
