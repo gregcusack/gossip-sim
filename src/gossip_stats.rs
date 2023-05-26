@@ -287,8 +287,8 @@ impl StatCollection {
     pub fn get_stat_by_index(
         &self,
         index: usize,
-    ) -> &f64 {
-        &self.collection[index]
+    ) -> f64 {
+        self.collection[index]
     }
 
     pub fn print_stats (
@@ -374,8 +374,8 @@ pub struct Histogram {
     // amount in bucket is the number of nodes that were stranded that many times
     entries: BTreeMap<u64, u64>,
 
-    min_stranded: u64,
-    max_stranded: u64,
+    min_entry: u64,
+    max_entry: u64,
     bucket_range: u64,
     num_buckets: u64,
 
@@ -385,8 +385,8 @@ impl Default for Histogram {
     fn default() -> Self {
         Self {
             entries: BTreeMap::default(),
-            min_stranded: 0,
-            max_stranded: 0,
+            min_entry: 0,
+            max_entry: 0,
             bucket_range: 0,
             num_buckets: 0,
         }
@@ -396,18 +396,18 @@ impl Default for Histogram {
 impl Histogram {
 
 
-    pub fn set_min_stranded(
+    pub fn set_min_entry(
         &mut self,
         val: u64,
     ) {
-        self.min_stranded = val;
+        self.min_entry = val;
     }
 
-    pub fn set_max_stranded(
+    pub fn set_max_entry(
         &mut self,
         val: u64,
     ) {
-        self.max_stranded = val;
+        self.max_entry = val;
     }
 
     pub fn set_bucket_range(
@@ -417,16 +417,16 @@ impl Histogram {
         self.bucket_range = val;
     }
 
-    pub fn min_stranded(
+    pub fn min_entry(
         &self,
     ) -> u64 {
-        self.min_stranded
+        self.min_entry
     }
 
-    pub fn max_stranded(
+    pub fn max_entry(
         &self,
     ) -> u64 {
-        self.max_stranded
+        self.max_entry
     }
 
     pub fn bucket_range(
@@ -691,7 +691,7 @@ impl StrandedNodeCollection {
         self.histogram.set_num_buckets(num_buckets);
         // Determine the range of each bucket
         self.histogram
-            .set_min_stranded(
+            .set_min_entry(
                 self.stranded_nodes
                         .iter()
                         .map(|(_, (_, times_stranded))| *times_stranded)
@@ -699,7 +699,7 @@ impl StrandedNodeCollection {
                         .unwrap_or(0));
 
          self.histogram
-            .set_max_stranded(
+            .set_max_entry(
                 self.stranded_nodes
                         .iter()
                         .map(|(_, (_, times_stranded))| *times_stranded)
@@ -707,12 +707,12 @@ impl StrandedNodeCollection {
                         .unwrap_or(0));
 
         self.histogram.set_bucket_range(
-            (self.histogram.max_stranded() - self.histogram.min_stranded() + self.histogram.num_buckets() - 1) / self.histogram.num_buckets());
+            (self.histogram.max_entry() - self.histogram.min_entry() + self.histogram.num_buckets() - 1) / self.histogram.num_buckets());
         
         // Iterate over the stranded_nodes entries
         for (_, times_stranded) in self.stranded_nodes.values() {
             // Determine the bucket index based on the times_stranded value
-            let bucket = (*times_stranded - self.histogram.min_stranded()) / self.histogram.bucket_range();
+            let bucket = (*times_stranded - self.histogram.min_entry()) / self.histogram.bucket_range();
             
             // Increment the count for the bucket in the histogram
             *self.histogram.entries.entry(bucket).or_insert(0) += 1;
@@ -1011,7 +1011,7 @@ impl GossipStats {
     pub fn get_rmr_by_index(
         &self,
         index: usize,
-    ) -> &f64 {
+    ) -> f64 {
         self.relative_message_redundancy_stats.get_stat_by_index(index)
     }
 
@@ -1143,8 +1143,8 @@ impl GossipStats {
         info!("|---------------------------------|"); 
         // Print the histogram sorted by bucket index
         for (bucket, count) in histogram.entries.iter() {
-            let bucket_min = histogram.min_stranded() + bucket * histogram.bucket_range();
-            let bucket_max = histogram.min_stranded() + (bucket + 1) * histogram.bucket_range() - 1;
+            let bucket_min = histogram.min_entry() + bucket * histogram.bucket_range();
+            let bucket_max = histogram.min_entry() + (bucket + 1) * histogram.bucket_range() - 1;
             info!("Bucket: {}-{}: Count: {}", bucket_min, bucket_max, count);
         }
     }
@@ -1178,10 +1178,17 @@ impl GossipStats {
         orders: &HashMap<Pubkey, HashMap<Pubkey, u64>>,
     ) {
         self.inbound_branching_factors
-        .collection
+            .collection
             .push(
                 BranchingFactor::calculate_inbound(orders));
 
+    }
+
+    pub fn get_outbound_branching_factor_by_index(
+        &self,
+        index: usize,
+    ) -> f64 {
+        self.outbound_branching_factors.get_stat_by_index(index)
     }
 
     pub fn calculate_branching_factor_stats(
@@ -1283,7 +1290,6 @@ impl GossipStatsCollection {
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
-
     use crate::gossip::{Cluster, make_gossip_cluster_for_tests, Node};
 
     use {
@@ -1461,8 +1467,8 @@ mod tests {
             
         }
 
-        assert_eq!(gossip_stats.get_rmr_by_index(0), &2.8);
-        assert_eq!(gossip_stats.get_rmr_by_index(95), &2.0);
+        assert_eq!(gossip_stats.get_rmr_by_index(0), 2.8);
+        assert_eq!(gossip_stats.get_rmr_by_index(95), 2.0);
 
         gossip_stats.calculate_rmr_stats();
         let rmr_stats = gossip_stats.get_rmr_stats();
@@ -1675,5 +1681,76 @@ mod tests {
         assert_eq!(coverage_stats.2, 6.0/10.0 as f64);
         assert_eq!(coverage_stats.3, 2.0/10.0 as f64);
     }
+
+    #[test]
+    fn test_branching_factors() {
+        let nodes: Vec<_> = repeat_with(Pubkey::new_unique).take(9).collect();
+        const MAX_STAKE: u64 = (1 << 20) * LAMPORTS_PER_SOL;
+        let mut rng = ChaChaRng::from_seed([189u8; 32]);
+        let pubkey = Pubkey::new_unique();
+        let stakes = repeat_with(|| rng.gen_range(1, MAX_STAKE));
+        let mut stakes: HashMap<_, _> = nodes.iter().copied().zip(stakes).collect();
+        stakes.insert(pubkey, rng.gen_range(1, MAX_STAKE));
+
+        for (key, stake) in stakes.iter() {
+            println!("{:?}, {}", key, stake);
+        }
+        let mut gossip_stats = GossipStats::default();
+
+        let mut pushes: HashMap<Pubkey, HashSet<Pubkey>> = HashMap::default();
+
+        let n0 = Pubkey::from_str("11111113pNDtm61yGF8j2ycAwLEPsuWQXobye5qDR").unwrap();
+        let n1 = Pubkey::from_str("111111152P2r5yt6odmBLPsFCLBrFisJ3aS7LqLAT").unwrap();
+        let n2 = Pubkey::from_str("11111112cMQwSC9qirWGjZM6gLGwW69X22mqwLLGP").unwrap();
+        let n3 = Pubkey::from_str("1111111ogCyDbaRMvkdsHB3qfdyFYaG1WtRUAfdh").unwrap();
+
+        let n4 = Pubkey::from_str("11111114d3RrygbPdAtMuFnDmzsN8T5fYKVQ7FVr7").unwrap();
+        let n5 = Pubkey::from_str("11111114DhpssPJgSi1YU7hCMfYt1BJ334YgsffXm").unwrap();
+        let n6 = Pubkey::from_str("111111131h1vYVSYuKP6AhS86fbRdMw9XHiZAvAaj").unwrap();
+        let n7 = Pubkey::from_str("1111111QLbz7JHiBTspS962RLKV8GndWFwiEaqKM").unwrap();
+
+
+
+        pushes.insert(n0, HashSet::default());
+        pushes.insert(n1, HashSet::default());
+        pushes.insert(n2, HashSet::default());
+        pushes.insert(n3, HashSet::default());
+        pushes.insert(n4, HashSet::default());
+        pushes.insert(n5, HashSet::default());
+        pushes.insert(n6, HashSet::default());
+        pushes.insert(n7, HashSet::default());
+
+        let h0 = pushes.get_mut(&n0).unwrap();
+        h0.insert(n3);
+        h0.insert(n7);
+        h0.insert(n4);
+
+        let h1 = pushes.get_mut(&n1).unwrap();
+        h1.insert(n5);
+        h1.insert(n6);
+
+        let h2 = pushes.get_mut(&n2).unwrap();
+        h2.insert(n6);
+
+        let h3 = pushes.get_mut(&n3).unwrap();
+        h3.insert(n1);
+
+        let h4 = pushes.get_mut(&n4).unwrap();
+        h4.insert(n5);
+
+        let h6 = pushes.get_mut(&n6).unwrap();
+        h6.insert(n5);
+
+        let h7 = pushes.get_mut(&n7).unwrap();
+        h7.insert(n2);
+
+        gossip_stats.calculate_outbound_branching_factor(&pushes);
+        let bf = gossip_stats.get_outbound_branching_factor_by_index(0);
+        
+        assert_eq!(bf, 1.25 as f64);
+
+    }
+
+
 
 }
