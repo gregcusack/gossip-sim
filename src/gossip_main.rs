@@ -157,7 +157,6 @@ fn parse_matches() -> ArgMatches {
                 .long("num-simulations")
                 .takes_value(true)
                 .default_value("1")
-                // .requires("test_type")
                 .help("Number of simulations to run. [default: 1]"),
         )
         .arg(
