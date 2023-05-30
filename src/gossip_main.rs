@@ -168,6 +168,29 @@ fn parse_matches() -> ArgMatches {
                 .requires("test_type")
                 .help("Size of step for test_type. [default: 1]"),
         )
+        .arg(
+            Arg::with_name("fail_nodes")
+                .long("fail-nodes")
+                .takes_value(false)
+                .requires("when_to_fail")
+                .help("Fail a certain percentage of nodes"),
+        )
+        .arg(
+            Arg::with_name("fraction_to_fail")
+                .long("fraction-to-fail")
+                .takes_value(true)
+                .default_value("0.1")
+                .requires("fail_nodes")
+                .help("Fail `fraction-to-fail` of total nodes in cluster"),
+        )
+        .arg(
+            Arg::with_name("when_to_fail")
+                .long("when-to-fail")
+                .takes_value(true)
+                .default_value("0")
+                .requires("fail_nodes")
+                .help("Fail `fraction-to-fail` of total nodes in cluster"),
+        )
         .get_matches()
 }
 
@@ -333,7 +356,7 @@ fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection
 
         cluster.consume_messages(origin_pubkey, &mut nodes);
         cluster.send_prunes(*origin_pubkey, &mut nodes, config.prune_stake_threshold, config.min_ingress_nodes, &stakes);
-        
+
         {
             let node_map: HashMap<Pubkey, &Node> = nodes
                 .iter()
@@ -344,6 +367,11 @@ fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection
 
         let mut rng = rand::thread_rng();
         cluster.chance_to_rotate(&mut rng, &mut nodes, config.gossip_active_set_size, &stakes, config.probability_of_rotation, &mut StdRng::from_entropy());
+    
+        if config.fail_nodes && i == config.when_to_fail {
+            cluster.fail_nodes(config.fraction_to_fail, &mut nodes);
+            stats.set_failed_nodes(cluster.get_failed_nodes());
+        }
     }
 
     stats.run_all_calculations(config.num_buckets_for_stranded_node_hist);
@@ -368,6 +396,9 @@ fn main() {
         probability_of_rotation: value_t_or_exit!(matches, "active_set_rotation_probability", f64),
         prune_stake_threshold: value_t_or_exit!(matches, "prune_stake_threshold", f64), 
         min_ingress_nodes: value_t_or_exit!(matches, "min_ingress_nodes", usize),
+        fail_nodes: matches.is_present("fail_nodes"),
+        fraction_to_fail: value_t_or_exit!(matches, "fraction_to_fail", f64), 
+        when_to_fail: value_t_or_exit!(matches, "when_to_fail", usize),
         filter_zero_staked_nodes: matches.is_present("remove_zero_staked_nodes"),
         num_buckets_for_stranded_node_hist: value_t_or_exit!(matches, "num_buckets_for_stranded_node_hist", u64),
         test_type: matches
