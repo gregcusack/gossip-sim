@@ -120,6 +120,25 @@ On each simulation run, the `active-set-size` will increment by `step-size`.
 The number of times a simulation is run (and `active-set-size` incremented) is defined by `num-simulations`.
 Default if `test-type` is not set is `no-test`. Meaning everything will run just once as before (so would be same as Option 2 or Option 3 above)
 
+#### Option 5: Pull accounts, fail a fraction of the nodes
+- This will pull all node accounts from mainnet and simulate the network.
+```
+cargo run --bin gossip-sim --
+    --push-fanout <push_fanout> 
+    --active-set-size <active_set_size> 
+    --iterations <number_of_gossip_iterations> 
+    --origin-rank <origin_stake_rank> 
+    --rotation-probability <probability-of-active-set-rotation> 
+    --min-ingress-nodes <min-ingress-nodes> 
+    --stake-threshold <min-stake-threshold>
+    --filter-zero-staked-nodes
+    --num-buckets <num-buckets-for-histogram>
+    --fail-nodes
+    --when-to-fail <gossip-iteration-to-fail-nodes-on>
+    --fraction-to-fail <fraction-of-nodes-to-fail (0 < f < 1)>
+```
+`fraction-to-fail` * total-nodes will fail right before the `when-to-fail`-th gossip iteration is run
+
 
 
 ## Interpreting the output
