@@ -302,6 +302,12 @@ fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection
         if i % 10 == 0 {
             info!("MST ITERATION: {}", i);
         }
+            
+        if config.fail_nodes && i == config.when_to_fail {
+            cluster.fail_nodes(config.fraction_to_fail, &mut nodes);
+            stats.set_failed_nodes(cluster.get_failed_nodes());
+        }
+        
         {
             let node_map: HashMap<Pubkey, &Node> = nodes
                 .iter()
@@ -367,11 +373,6 @@ fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection
 
         let mut rng = rand::thread_rng();
         cluster.chance_to_rotate(&mut rng, &mut nodes, config.gossip_active_set_size, &stakes, config.probability_of_rotation, &mut StdRng::from_entropy());
-    
-        if config.fail_nodes && i == config.when_to_fail {
-            cluster.fail_nodes(config.fraction_to_fail, &mut nodes);
-            stats.set_failed_nodes(cluster.get_failed_nodes());
-        }
     }
 
     stats.run_all_calculations(config.num_buckets_for_stranded_node_hist);
