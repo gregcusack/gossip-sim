@@ -157,7 +157,6 @@ fn parse_matches() -> ArgMatches {
                 .long("num-simulations")
                 .takes_value(true)
                 .default_value("1")
-                .requires("test_type")
                 .help("Number of simulations to run. [default: 1]"),
         )
         .arg(
@@ -512,7 +511,9 @@ fn main() {
             }
         }
         Testing::NoTest => {
-            run_simulation(&config, &matches, &mut gossip_stats_collection);
+            for _ in 0..config.num_simulations {
+                run_simulation(&config, &matches, &mut gossip_stats_collection);
+            }
         }
     }
 
