@@ -490,9 +490,6 @@ impl Cluster {
                     }
 
                     debug!("curr node, neighbor: {:?}, {:?}", current_node.pubkey(), neighbor);
-                    // if current_node_pubkey == Pubkey::from_str("B5GABybkqGaxxFE6bcN6TEejDF2tuz6yREciLhvvKyMp").unwrap() {
-                    //     info!("neighbor for KyMp: {:?}", neighbor);
-                    // }
 
                     // add neighbor to current_node pushes map
                     // I think this is the one we care about at all times.

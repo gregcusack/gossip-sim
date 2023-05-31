@@ -1430,6 +1430,16 @@ impl GossipStatsCollection {
         self.gossip_stats_collection.push(gossip_stat);
     }
 
+    fn get_total_stranded_iterations(
+        &self,
+    ) {
+        let mut total_stranded_iterations: u64 = 0;
+        for gossip_stat in self.gossip_stats_collection.iter() {
+            total_stranded_iterations += gossip_stat.stranded_nodes.get_total_stranded_iterations();
+        }
+        info!("Total stranded node iterations across all simulations {}", total_stranded_iterations);
+    }
+
     pub fn print_all(
         &self,
         gossip_iterations: usize,
@@ -1446,6 +1456,8 @@ impl GossipStatsCollection {
             info!("{:#?}", stat.simulation_parameters);
             stat.print_all()
         }
+
+        self.get_total_stranded_iterations();
     }
 }
 

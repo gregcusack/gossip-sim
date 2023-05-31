@@ -229,7 +229,8 @@ fn find_nth_largest_node(n: usize, nodes: &[Node]) -> Option<&Node> {
     heap.peek().map(|Reverse(stake)| nodes.iter().find(|node| node.stake() == *stake)).flatten()
 }
 
-fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection: &mut GossipStatsCollection) {
+fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection: &mut GossipStatsCollection, iteration: usize) {
+    info!("##### SIMULATION ITERATION: {} #####", iteration);
     // check if we want to read in pubkeys/stakes from a file
     let nodes = if config.accounts_from_file {
         // READ ACCOUNTS FROM FILE
@@ -446,7 +447,7 @@ fn main() {
                 config.gossip_active_set_size = active_set_size;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, i);
             }
         }
         Testing::PushFanout => {
@@ -461,7 +462,7 @@ fn main() {
                 config.gossip_push_fanout = push_fanout;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, i);
             }
 
         }
@@ -477,7 +478,7 @@ fn main() {
                 config.min_ingress_nodes = min_ingress_nodes;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, i);
             }
         }
         Testing::MinStakeThreshold => {
@@ -492,7 +493,7 @@ fn main() {
                 config.prune_stake_threshold = prune_stake_threshold;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, i);
             }
         }
         Testing::OriginRank => {
@@ -507,12 +508,12 @@ fn main() {
                 config.origin_rank = origin_rank;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, i);
             }
         }
         Testing::NoTest => {
-            for _ in 0..config.num_simulations {
-                run_simulation(&config, &matches, &mut gossip_stats_collection);
+            for i in 0..config.num_simulations {
+                run_simulation(&config, &matches, &mut gossip_stats_collection, i);
             }
         }
     }
