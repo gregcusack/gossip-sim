@@ -189,7 +189,14 @@ fn parse_matches() -> ArgMatches {
                 .takes_value(true)
                 .default_value("0")
                 .requires("fail_nodes")
-                .help("Fail `fraction-to-fail` of total nodes in cluster"),
+                .help("On what iteration should the nodes fail"),
+        )
+        .arg(
+            Arg::with_name("warm_up_rounds")
+                .long("warm-up-rounds")
+                .takes_value(true)
+                .default_value("200")
+                .help("Number of gossip rounds to run before measuring statistics"),
         )
         .get_matches()
 }
@@ -317,50 +324,6 @@ fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection
                 .collect();
             cluster.run_gossip(origin_pubkey, &stakes, &node_map);
         }
-        
-        // info!("Calculation Complete. Printing results...");
-        // cluster.print_hops();
-        // cluster.print_node_orders();
-
-        // info!("Origin Node: {:?}", origin_pubkey);
-        // cluster.print_mst();
-        // cluster.print_prunes();
-
-        let (coverage, stranded_nodes) = cluster.coverage(&stakes);
-        debug!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
-        debug!("{} nodes are stranded", stranded_nodes);
-        if coverage < poor_coverage_threshold {
-            warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
-            _number_of_poor_coverage_runs += 1;
-        }
-
-        stats.insert_stranded_nodes(
-            &cluster.stranded_nodes(), 
-            &stakes
-        );
-        
-        stats.insert_coverage(coverage);
-        // stats.insert_hops_stat(
-        //     HopsStat::new(
-        //         cluster.get_distances()
-        //     )
-        // );
-
-        stats.insert_hops_stat(cluster.get_distances());
-
-        if log::log_enabled!(Level::Debug) {
-            cluster.print_pushes();
-        }
-
-        match cluster.relative_message_redundancy() {
-            Ok(result) => {
-                stats.insert_rmr(result);
-            },
-            Err(_) => error!("Network RMR error. # of nodes is 1."),
-        }
-
-        stats.calculate_outbound_branching_factor(cluster.get_pushes());
-        stats.calculate_inbound_branching_factor(cluster.get_orders());
 
         cluster.consume_messages(origin_pubkey, &mut nodes);
         cluster.send_prunes(*origin_pubkey, &mut nodes, config.prune_stake_threshold, config.min_ingress_nodes, &stakes);
@@ -375,11 +338,43 @@ fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection
 
         let mut rng = rand::thread_rng();
         cluster.chance_to_rotate(&mut rng, &mut nodes, config.gossip_active_set_size, &stakes, config.probability_of_rotation, &mut StdRng::from_entropy());
-    }
 
-    stats.run_all_calculations(config.num_buckets_for_stranded_node_hist);
-    // stats.print_all();
-    gossip_stats_collection.push(stats.clone());
+        // wait until after set number of warmup rounds to begin calculating gossip stats
+        if i >= config.warm_up_rounds {
+            let (coverage, stranded_nodes) = cluster.coverage(&stakes);
+            debug!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
+            debug!("{} nodes are stranded", stranded_nodes);
+            if coverage < poor_coverage_threshold {
+                warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
+                _number_of_poor_coverage_runs += 1;
+            }
+
+            stats.insert_coverage(coverage);
+            stats.insert_hops_stat(cluster.get_distances());
+
+            match cluster.relative_message_redundancy() {
+                Ok(result) => {
+                    stats.insert_rmr(result);
+                },
+                Err(_) => error!("Network RMR error. # of nodes is 1."),
+            }
+
+            stats.insert_stranded_nodes(
+                &cluster.stranded_nodes(), 
+                &stakes
+            );
+            
+            if log::log_enabled!(Level::Debug) {
+                cluster.print_pushes();
+            }
+
+            stats.calculate_outbound_branching_factor(cluster.get_pushes());
+        }
+    }
+    if !stats.is_empty() {
+        stats.run_all_calculations(config.num_buckets_for_stranded_node_hist);
+        gossip_stats_collection.push(stats.clone());
+    }
 }
 
 fn main() {
@@ -432,7 +427,14 @@ fn main() {
                             })
                     })
                     .unwrap(),
+        warm_up_rounds: value_t_or_exit!(matches, "warm_up_rounds", usize),
     };
+
+    if config.gossip_iterations <= config.warm_up_rounds {
+        warn!("WARNING: Gossip Iterations ({}) <= Warm Up Rounds ({}). No stats will be recorded....", 
+            config.gossip_iterations, 
+            config.warm_up_rounds);
+    }
 
     let mut gossip_stats_collection = GossipStatsCollection::default();
     gossip_stats_collection.set_number_of_simulations(config.num_simulations);
@@ -521,8 +523,11 @@ fn main() {
         }
     }
 
-    gossip_stats_collection.print_all(config.gossip_iterations, config.test_type);
-
+    if !gossip_stats_collection.is_empty() {
+        gossip_stats_collection.print_all(config.gossip_iterations, config.warm_up_rounds, config.test_type);
+    } else {
+        warn!("WARNING: Gossip Stats Collection is empty. Is `Iterations` <= `warm-up-rounds`?");
+    }
 }
 
 #[cfg(test)]
