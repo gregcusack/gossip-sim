@@ -333,7 +333,7 @@ fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection
                 .iter()
                 .map(|node| (node.pubkey(), node))
                 .collect();
-            cluster.prune_connections(&node_map, &stakes, i);
+            cluster.prune_connections(&node_map, &stakes);
         }
 
         let mut rng = rand::thread_rng();

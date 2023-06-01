@@ -634,18 +634,14 @@ impl Cluster {
             self.prunes
                 .insert(node.pubkey(), prunes);
         }
-
     }
 
     // pruner has sent prunes to a bunch of nodes. we are going to handle
     // those prunes from the side of the nodes (aka the prunees)
     pub fn prune_connections(
         &mut self,
-        // origin: &Pubkey,
         node_map: &HashMap<Pubkey, &Node>,
-        // nodes: &mut Vec<Node>,
         stakes: &HashMap<Pubkey, u64>,
-        gossip_iteration: usize,
     ) {
         // pruner: sending the prunes.
         // prunes: peers and origins. 
@@ -654,7 +650,6 @@ impl Cluster {
             // from the pruner.
             if prunes.len() > 0 {
                 self.total_prunes += prunes.len();
-                // info!("iter: {}, pruner: {:?}, prune count: {}", gossip_iteration, pruner, prunes.len());
             }
             for (current_pubkey, origins) in prunes {
                 // now we switch into the context of the prunee. 
@@ -669,8 +664,7 @@ impl Cluster {
                 }
             }
         }
-        trace!("Iter: {}, total prunes: {}", gossip_iteration, self.total_prunes);
-
+        trace!("total prunes: {}", self.total_prunes);
     }
 
     pub fn chance_to_rotate<R: Rng>(
@@ -706,7 +700,6 @@ impl Cluster {
             nodes[i].fail_node();
             self.failed_nodes.insert(nodes[i].pubkey());
         }
-
         info!("Total nodes failed: {}", total_nodes_to_fail);
     }
 }
