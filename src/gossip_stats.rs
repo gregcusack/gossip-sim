@@ -308,6 +308,12 @@ impl StatCollection {
         self.collection[index]
     }
 
+    pub fn is_empty(
+        &self,
+    ) -> bool {
+        self.collection.is_empty()
+    }
+
     pub fn print_stats (
         &self,
     ) {
@@ -836,26 +842,6 @@ impl BranchingFactor {
             0.0 // 0 if the graph has no nodes
         }
     }
-
-    pub fn calculate_inbound(
-        orders: &HashMap<Pubkey, HashMap<Pubkey, u64>>,
-    ) -> f64 {
-        let total_nodes = orders.len();
-        let mut inbound_connections = 0;
-    
-        for source in orders.values() {
-            inbound_connections += source.len();
-        }
-    
-        if total_nodes > 0 {
-            inbound_connections as f64 / total_nodes as f64
-        } else {
-            // self.factor = 0.0 // 0 if the graph has no nodes
-            0.0 // 0 if the graph has no nodes
-        }
-    }
-
-
 }
 
 #[derive(Debug, Clone)]
@@ -902,7 +888,6 @@ pub struct GossipStats {
     relative_message_redundancy_stats: StatCollection,
     stranded_nodes: StrandedNodeCollection,
     outbound_branching_factors: StatCollection,
-    inbound_branching_factors: StatCollection,
     origin: Pubkey,
     pub simulation_parameters: SimulationParamaters,
     failed_nodes: HashSet<Pubkey>,
@@ -916,7 +901,6 @@ impl Default for GossipStats {
             relative_message_redundancy_stats: StatCollection::new("RMR"),
             stranded_nodes: StrandedNodeCollection::default(),
             outbound_branching_factors: StatCollection::new("Outbound Branching Factor"),
-            inbound_branching_factors: StatCollection::new("Inbound Branching Factor"),
             origin: Pubkey::default(),
             simulation_parameters: SimulationParamaters::default(),
             failed_nodes: HashSet::default(),
@@ -1021,7 +1005,6 @@ impl GossipStats {
             } else {
                 info!("Bucket: {}-{}: Count: {}", bucket_min, bucket_max, count);
             }
-
         }
     }
 
@@ -1294,10 +1277,6 @@ impl GossipStats {
         info!("|---- OUTBOUND BRANCHING FACTOR ----|");
         info!("|-----------------------------------|"); 
         self.outbound_branching_factors.print_stats();
-        info!("|----------------------------------|");
-        info!("|---- INBOUND BRANCHING FACTOR ----|");
-        info!("|----------------------------------|"); 
-        self.inbound_branching_factors.print_stats();
     }
 
     pub fn calculate_outbound_branching_factor(
@@ -1308,18 +1287,6 @@ impl GossipStats {
             .collection
             .push(
                 BranchingFactor::calculate_outbound(pushes));
-
-    }
-
-    pub fn calculate_inbound_branching_factor(
-        &mut self,
-        orders: &HashMap<Pubkey, HashMap<Pubkey, u64>>,
-    ) {
-        self.inbound_branching_factors
-            .collection
-            .push(
-                BranchingFactor::calculate_inbound(orders));
-
     }
 
     pub fn get_outbound_branching_factor_by_index(
@@ -1333,7 +1300,6 @@ impl GossipStats {
         &mut self,
     ) {
         self.outbound_branching_factors.calculate_stats();
-        self.inbound_branching_factors.calculate_stats();
     }
 
     // not efficient but this is just for stat recording
@@ -1358,6 +1324,13 @@ impl GossipStats {
         }
     }
 
+    pub fn is_empty(
+        &self,
+    ) -> bool {
+        // if we haven't added anything to GossipStats, return true
+        self.coverage_stats.is_empty()
+    }
+
     pub fn run_all_calculations(
         &mut self,
         num_buckets: u64,
@@ -1370,7 +1343,6 @@ impl GossipStats {
         self.calculate_stranded_stats();
         self.build_stranded_node_histogram(num_buckets);
         self.calculate_branching_factor_stats();
-
     }
 
     pub fn print_all(
@@ -1439,15 +1411,25 @@ impl GossipStatsCollection {
         }
         info!("Total stranded node iterations across all simulations {}", total_stranded_iterations);
     }
+    
+    pub fn is_empty(
+        &self,
+    ) -> bool {
+        self.gossip_stats_collection.is_empty()
+    }
 
     pub fn print_all(
         &self,
         gossip_iterations: usize,
+        warm_up_rounds: usize,
         test_type: Testing,
     ) {
+        let measured_iterations = gossip_iterations - warm_up_rounds;
         info!("|----------------------------------------------------------|");
         info!("|--- GOSSIP STATS COLLECTION ACROSS ALL {} SIMULATION(S) ---|", self.num_sims);
         info!("|--- Gossip Iterations: {} ", gossip_iterations);
+        info!("|--- Warm Up Rounds: {}", warm_up_rounds);
+        info!("|--- Total Measured Rounds For Gossip Stats: {}", measured_iterations);
         info!("|--- Test Type: {} ", test_type);
         info!("|----------------------------------------------------------|"); 
         for (iteration, stat) in self.gossip_stats_collection.iter().enumerate() {
