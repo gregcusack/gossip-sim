@@ -1,6 +1,6 @@
 use {
     crate::{Stats, HopsStats},
-    log::{info, error, warn},
+    log::{info, error, warn, debug},
     std::collections::{HashMap, BTreeMap, HashSet},
     solana_sdk::pubkey::Pubkey,
     crate::gossip::{Testing, StepSize, Config},
@@ -803,42 +803,6 @@ impl StrandedNodeCollection {
                 .map(|&(_, value)| value)
                 .collect()
             );
-
-        // self.histogram.set_num_buckets(num_buckets);
-        // // Determine the range of each bucket
-        // self.histogram
-        //     .set_min_entry(
-        //         self.stranded_nodes
-        //                 .iter()
-        //                 .map(|(_, (_, times_stranded))| *times_stranded)
-        //                 .min()
-        //                 .unwrap_or(0));
-
-        //  self.histogram
-        //     .set_max_entry(
-        //         self.stranded_nodes
-        //                 .iter()
-        //                 .map(|(_, (_, times_stranded))| *times_stranded)
-        //                 .max()
-        //                 .unwrap_or(0));
-
-
-        // if self.histogram.max_entry() == self.histogram.min_entry() {
-        //     warn!("WARNING: Max and Min stranded node frequencies are the same.");
-        //     self.histogram.set_bucket_range(1);
-        // } else {
-        //     self.histogram.set_bucket_range(
-        //         (self.histogram.max_entry() - self.histogram.min_entry() + self.histogram.num_buckets() - 1) / self.histogram.num_buckets());    
-        // }
-        
-        // // Iterate over the stranded_nodes entries
-        // for (_, times_stranded) in self.stranded_nodes.values() {
-        //     // Determine the bucket index based on the times_stranded value
-        //     let bucket = (*times_stranded - self.histogram.min_entry()) / self.histogram.bucket_range();
-            
-        //     // Increment the count for the bucket in the histogram
-        //     *self.histogram.entries.entry(bucket).or_insert(0) += 1;
-        // }
     }
 
     pub fn get_histogram(
@@ -903,6 +867,9 @@ pub struct SimulationParamaters {
     pub probability_of_rotation: f64,
     pub prune_stake_threshold: f64,
     pub min_ingress_nodes: usize,
+    pub fail_nodes: bool,
+    pub fraction_to_fail: f64,
+    pub when_to_fail: usize,
     pub test_type: Testing,
     pub num_simulations: usize,
     pub step_size: StepSize,
@@ -918,6 +885,9 @@ impl Default for SimulationParamaters {
             probability_of_rotation: 0.0,
             prune_stake_threshold: 0.0,
             min_ingress_nodes: 0,
+            fail_nodes: false,
+            fraction_to_fail: 0.0,
+            when_to_fail: 0,
             test_type: Testing::NoTest,
             num_simulations: 0,
             step_size: StepSize::Integer(0),
@@ -935,6 +905,7 @@ pub struct GossipStats {
     inbound_branching_factors: StatCollection,
     origin: Pubkey,
     pub simulation_parameters: SimulationParamaters,
+    failed_nodes: HashSet<Pubkey>,
 }
 
 impl Default for GossipStats {
@@ -948,6 +919,7 @@ impl Default for GossipStats {
             inbound_branching_factors: StatCollection::new("Inbound Branching Factor"),
             origin: Pubkey::default(),
             simulation_parameters: SimulationParamaters::default(),
+            failed_nodes: HashSet::default(),
         }
     }
 }
@@ -978,6 +950,9 @@ impl GossipStats {
             probability_of_rotation: config.probability_of_rotation,
             prune_stake_threshold: config.prune_stake_threshold,
             min_ingress_nodes: config.min_ingress_nodes, 
+            fail_nodes: config.fail_nodes,
+            fraction_to_fail: config.fraction_to_fail,
+            when_to_fail: config.when_to_fail,
             test_type: config.test_type,
             num_simulations: config.num_simulations,
             step_size: config.step_size,
@@ -1361,6 +1336,28 @@ impl GossipStats {
         self.inbound_branching_factors.calculate_stats();
     }
 
+    // not efficient but this is just for stat recording
+    pub fn set_failed_nodes(
+        &mut self,
+        failed_nodes: &HashSet<Pubkey>,
+    ) {
+        for key in failed_nodes.iter() {
+            self.failed_nodes.insert(*key);
+        }
+    }
+
+    pub fn print_failed_nodes(
+        &self,
+    ) {
+        info!("|----------------------|");
+        info!("|---- FAILED NODES ----|");
+        info!("|----------------------|"); 
+        info!("Total Failed: {}", self.failed_nodes.len());
+        for key in self.failed_nodes.iter() {
+            debug!("{:?}", key);
+        }
+    }
+
     pub fn run_all_calculations(
         &mut self,
         num_buckets: u64,
@@ -1387,6 +1384,7 @@ impl GossipStats {
         self.print_stranded_stats();
         self.print_stranded_node_histogram();
         self.print_stranded();
+        self.print_failed_nodes();
         self.print_branching_factor_stats();
         // self.print_hops_stats();
     }
@@ -1432,6 +1430,16 @@ impl GossipStatsCollection {
         self.gossip_stats_collection.push(gossip_stat);
     }
 
+    fn get_total_stranded_iterations(
+        &self,
+    ) {
+        let mut total_stranded_iterations: u64 = 0;
+        for gossip_stat in self.gossip_stats_collection.iter() {
+            total_stranded_iterations += gossip_stat.stranded_nodes.get_total_stranded_iterations();
+        }
+        info!("Total stranded node iterations across all simulations {}", total_stranded_iterations);
+    }
+
     pub fn print_all(
         &self,
         gossip_iterations: usize,
@@ -1448,6 +1456,8 @@ impl GossipStatsCollection {
             info!("{:#?}", stat.simulation_parameters);
             stat.print_all()
         }
+
+        self.get_total_stranded_iterations();
     }
 }
 
@@ -1488,7 +1498,7 @@ mod tests {
         active_set_size: usize,
     ) {
         for node in nodes {
-            node.run_gossip(rng, stakes, active_set_size, true);
+            node.initialize_gossip(rng, stakes, active_set_size, true);
         }
     }
 
@@ -1607,7 +1617,7 @@ mod tests {
                     .iter()
                     .map(|node| (node.pubkey(), node))
                     .collect();
-                cluster.new_mst(origin_pubkey, &stakes, &node_map);
+                cluster.run_gossip(origin_pubkey, &stakes, &node_map);
             }
 
             match cluster.relative_message_redundancy() {

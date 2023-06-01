@@ -16,3 +16,4 @@ src/configs/mainnet_stakes.yaml
 .vscode/
 *.yaml
 notes/
+data/

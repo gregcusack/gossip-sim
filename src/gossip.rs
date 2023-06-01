@@ -2,8 +2,7 @@ use {
     crate::{push_active_set::PushActiveSet, received_cache::ReceivedCache, Error, gossip_stats},
     crossbeam_channel::{Receiver, Sender},
     itertools::Itertools,
-    rand::Rng,
-    log::{debug, info, error},
+    log::{debug, info, error, trace},
     solana_client::{
         rpc_client::RpcClient, rpc_config::RpcGetVoteAccountsConfig,
         rpc_response::RpcVoteAccountStatus,
@@ -18,7 +17,11 @@ use {
         io::{BufWriter, Write},
         iter::repeat,
     },
-    rand::rngs::StdRng,
+    rand::{
+        rngs::StdRng,
+        Rng,
+        seq::SliceRandom
+    },
 };
 
 #[cfg_attr(test, cfg(test))]
@@ -100,9 +103,13 @@ pub struct Config<'a> {
     pub min_ingress_nodes: usize,
     pub filter_zero_staked_nodes: bool,
     pub num_buckets_for_stranded_node_hist: u64,
+    pub fail_nodes: bool,
+    pub fraction_to_fail: f64,
+    pub when_to_fail: usize,
     pub test_type: Testing,
     pub num_simulations: usize,
     pub step_size: StepSize,
+
 }
 
 pub struct Cluster {
@@ -143,6 +150,10 @@ pub struct Cluster {
     // pruner => prunee => Vec<origin>. pruner creates prune message. Prunee processes that prune
     // message, and stops sending messages to pruner.
     prunes: HashMap<Pubkey, HashMap<Pubkey, Vec<Pubkey>>>,
+
+    // for testing purposes. Can fail a certain percentage of nodes.
+    // Failed nodes are picked randomly. and when they fail they are set here
+    failed_nodes: HashSet<Pubkey>,
 }
 
 impl Cluster {
@@ -160,6 +171,7 @@ impl Cluster {
             prunes: HashMap::new(),
             pushes: HashMap::new(),
             rmr: gossip_stats::RelativeMessageRedundancy::default(),
+            failed_nodes: HashSet::new(),
         }
     }
 
@@ -279,8 +291,12 @@ impl Cluster {
     ) -> Vec<Pubkey> {
         let mut stranded_pubkeys: Vec<Pubkey> = Vec::new();
 
+        // don't include failed nodes in stranded nodes. 
+        // they are stranded technically but for a different reason (aka they failed)
+        // note: nodes that end up failing could have been stranded before they failed
+        // so it is possible that we see nodes that end up failing in this list
         for (pubkey, hops) in self.distances.iter() {
-            if hops == &u64::MAX {
+            if hops == &u64::MAX && !self.failed_nodes.contains(pubkey) {
                 stranded_pubkeys.push(*pubkey);
             }
         }
@@ -292,6 +308,12 @@ impl Cluster {
         &self,
     ) -> &HashMap<Pubkey, u64> {
         &self.distances
+    }
+
+    pub fn get_failed_nodes(
+        &self,
+    ) -> &HashSet<Pubkey> {
+        &self.failed_nodes
     }
 
     pub fn get_prunes(
@@ -420,7 +442,7 @@ impl Cluster {
         }
     }
 
-    pub fn new_mst(
+    pub fn run_gossip(
         &mut self,
         origin_pubkey: &Pubkey,
         stakes: &HashMap<Pubkey, u64>,
@@ -461,10 +483,13 @@ impl Cluster {
                 )
                 .take(self.gossip_push_fanout)
                 .enumerate() {
+                    // check if node has failed. if it is, we do process this neighbor node.
+                    if node_map.get(neighbor).unwrap().failed() {
+                        trace!("NODE FAILED: {:?}", neighbor);
+                        continue;
+                    }
+
                     debug!("curr node, neighbor: {:?}, {:?}", current_node.pubkey(), neighbor);
-                    // if current_node_pubkey == Pubkey::from_str("B5GABybkqGaxxFE6bcN6TEejDF2tuz6yREciLhvvKyMp").unwrap() {
-                    //     info!("neighbor for KyMp: {:?}", neighbor);
-                    // }
 
                     // add neighbor to current_node pushes map
                     // I think this is the one we care about at all times.
@@ -657,6 +682,30 @@ impl Cluster {
         }
     }
 
+    pub fn fail_nodes(
+        &mut self,
+        fraction_to_fail: f64,
+        nodes: &mut Vec<Node>,
+    ) {
+        let total_nodes_to_fail = (fraction_to_fail * nodes.len() as f64) as usize;
+
+        let mut rng = rand::thread_rng();
+        nodes.shuffle(&mut rng);
+        
+        for i in 0..total_nodes_to_fail {
+            nodes[i].fail_node();
+            self.failed_nodes.insert(nodes[i].pubkey());
+        }
+
+        info!("Total nodes failed: {}", total_nodes_to_fail);
+        // info!("Failed nodes: ");
+        // for node in failed_nodes {
+        //     info!("{:?}", node);
+        // }
+
+
+    }
+
 
 }
 
@@ -671,6 +720,7 @@ pub struct Node {
     active_set: PushActiveSet,
     received_cache: ReceivedCache,
     _receiver: Receiver<Arc<Packet>>,
+    failed: bool,
 }
 
 impl Node {
@@ -690,7 +740,7 @@ impl Node {
         self.num_gossip_rounds
     }
 
-    pub fn run_gossip<R: Rng>(
+    pub fn initialize_gossip<R: Rng>(
         &mut self,
         rng: &mut R,
         stakes: &HashMap<Pubkey, u64>,
@@ -727,6 +777,18 @@ impl Node {
         // note, here the default is 6*3=18. but in solana it is 6*2=12
         self.active_set
             .rotate(rng, active_set_size, cluster_size, &nodes, stakes, self.pubkey());
+    }
+
+    pub fn failed(
+        &self,
+    ) -> bool {
+        self.failed
+    }
+
+    pub fn fail_node(
+        &mut self
+    ) {
+        self.failed = true;
     }
 
 }
@@ -781,6 +843,7 @@ fn make_gossip_cluster(
                     active_set: PushActiveSet::default(),
                     received_cache: ReceivedCache::new(2 * CRDS_UNIQUE_PUBKEY_CAPACITY),
                     _receiver,
+                    failed: false,
                 };
                 Ok((node, sender))
             })
@@ -860,6 +923,7 @@ pub fn make_gossip_cluster_for_tests(
                 active_set: PushActiveSet::default(),
                 received_cache: ReceivedCache::new(2 * CRDS_UNIQUE_PUBKEY_CAPACITY),
                 _receiver,
+                failed: false,
             };
             Ok((node, sender))
         })
@@ -907,7 +971,7 @@ mod tests {
         active_set_size: usize,
     ) {
         for node in nodes {
-            node.run_gossip(rng, stakes, active_set_size, true);
+            node.initialize_gossip(rng, stakes, active_set_size, true);
         }
     }
 
@@ -947,7 +1011,7 @@ mod tests {
 
         let mut cluster: Cluster = Cluster::new(PUSH_FANOUT);
         let origin_pubkey = &pubkey; //just a temp origin selection
-        cluster.new_mst(origin_pubkey, &stakes, &node_map);
+        cluster.run_gossip(origin_pubkey, &stakes, &node_map);
 
         // verify buckets
         let mut keys = stakes.keys().cloned().collect::<Vec<_>>();

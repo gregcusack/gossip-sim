@@ -29,6 +29,7 @@ use {
     },
     rand::rngs::StdRng,
     rand::SeedableRng,
+    rayon::prelude::*,
 };
 
 fn parse_matches() -> ArgMatches {
@@ -157,7 +158,6 @@ fn parse_matches() -> ArgMatches {
                 .long("num-simulations")
                 .takes_value(true)
                 .default_value("1")
-                .requires("test_type")
                 .help("Number of simulations to run. [default: 1]"),
         )
         .arg(
@@ -167,6 +167,29 @@ fn parse_matches() -> ArgMatches {
                 .default_value("1")
                 .requires("test_type")
                 .help("Size of step for test_type. [default: 1]"),
+        )
+        .arg(
+            Arg::with_name("fail_nodes")
+                .long("fail-nodes")
+                .takes_value(false)
+                .requires("when_to_fail")
+                .help("Fail a certain percentage of nodes"),
+        )
+        .arg(
+            Arg::with_name("fraction_to_fail")
+                .long("fraction-to-fail")
+                .takes_value(true)
+                .default_value("0.1")
+                .requires("fail_nodes")
+                .help("Fail `fraction-to-fail` of total nodes in cluster"),
+        )
+        .arg(
+            Arg::with_name("when_to_fail")
+                .long("when-to-fail")
+                .takes_value(true)
+                .default_value("0")
+                .requires("fail_nodes")
+                .help("Fail `fraction-to-fail` of total nodes in cluster"),
         )
         .get_matches()
 }
@@ -179,18 +202,19 @@ fn validate_testing(val: &str) -> Result<(), String> {
 }
 
 
-pub fn run_gossip(
+pub fn initialize_gossip(
     // nodes: &[RwLock<Node>],
     nodes: &mut Vec<Node>,
     stakes: &HashMap<Pubkey, /*stake:*/ u64>,
     active_set_size: usize,
 ) -> Result<(), Error> {
-    let mut rng = rand::thread_rng();
-    // let mut rng = ChaChaRng::from_seed([189u8; 32]);
-    for node in nodes {
-        node.run_gossip(&mut rng, stakes, active_set_size, false);
-    }
+    let rng = StdRng::from_entropy();
     
+    nodes.par_iter_mut().for_each(|node| {
+        let mut local_rng = rng.clone();
+        node.initialize_gossip(&mut local_rng, stakes, active_set_size, false);
+    });
+
     Ok(())
 }
 
@@ -207,7 +231,8 @@ fn find_nth_largest_node(n: usize, nodes: &[Node]) -> Option<&Node> {
     heap.peek().map(|Reverse(stake)| nodes.iter().find(|node| node.stake() == *stake)).flatten()
 }
 
-fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection: &mut GossipStatsCollection) {
+fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection: &mut GossipStatsCollection, iteration: usize) {
+    info!("##### SIMULATION ITERATION: {} #####", iteration);
     // check if we want to read in pubkeys/stakes from a file
     let nodes = if config.accounts_from_file {
         // READ ACCOUNTS FROM FILE
@@ -260,7 +285,7 @@ fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection
     
     //collect vector of nodes
     info!("Simulating Gossip and setting active sets. Please wait.....");
-    let _res = run_gossip(&mut nodes, &stakes, config.gossip_active_set_size).unwrap();
+    let _res = initialize_gossip(&mut nodes, &stakes, config.gossip_active_set_size).unwrap();
     info!("Simulation Complete!");
 
     let mut cluster: Cluster = Cluster::new(config.gossip_push_fanout);
@@ -279,12 +304,18 @@ fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection
         if i % 10 == 0 {
             info!("MST ITERATION: {}", i);
         }
+            
+        if config.fail_nodes && i == config.when_to_fail {
+            cluster.fail_nodes(config.fraction_to_fail, &mut nodes);
+            stats.set_failed_nodes(cluster.get_failed_nodes());
+        }
+        
         {
             let node_map: HashMap<Pubkey, &Node> = nodes
                 .iter()
                 .map(|node| (node.pubkey(), node))
                 .collect();
-            cluster.new_mst(origin_pubkey, &stakes, &node_map);
+            cluster.run_gossip(origin_pubkey, &stakes, &node_map);
         }
         
         // info!("Calculation Complete. Printing results...");
@@ -333,7 +364,7 @@ fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection
 
         cluster.consume_messages(origin_pubkey, &mut nodes);
         cluster.send_prunes(*origin_pubkey, &mut nodes, config.prune_stake_threshold, config.min_ingress_nodes, &stakes);
-        
+
         {
             let node_map: HashMap<Pubkey, &Node> = nodes
                 .iter()
@@ -368,6 +399,9 @@ fn main() {
         probability_of_rotation: value_t_or_exit!(matches, "active_set_rotation_probability", f64),
         prune_stake_threshold: value_t_or_exit!(matches, "prune_stake_threshold", f64), 
         min_ingress_nodes: value_t_or_exit!(matches, "min_ingress_nodes", usize),
+        fail_nodes: matches.is_present("fail_nodes"),
+        fraction_to_fail: value_t_or_exit!(matches, "fraction_to_fail", f64), 
+        when_to_fail: value_t_or_exit!(matches, "when_to_fail", usize),
         filter_zero_staked_nodes: matches.is_present("remove_zero_staked_nodes"),
         num_buckets_for_stranded_node_hist: value_t_or_exit!(matches, "num_buckets_for_stranded_node_hist", u64),
         test_type: matches
@@ -416,7 +450,7 @@ fn main() {
                 config.gossip_active_set_size = active_set_size;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, i);
             }
         }
         Testing::PushFanout => {
@@ -431,7 +465,7 @@ fn main() {
                 config.gossip_push_fanout = push_fanout;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, i);
             }
 
         }
@@ -447,7 +481,7 @@ fn main() {
                 config.min_ingress_nodes = min_ingress_nodes;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, i);
             }
         }
         Testing::MinStakeThreshold => {
@@ -462,7 +496,7 @@ fn main() {
                 config.prune_stake_threshold = prune_stake_threshold;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, i);
             }
         }
         Testing::OriginRank => {
@@ -477,11 +511,13 @@ fn main() {
                 config.origin_rank = origin_rank;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, i);
             }
         }
         Testing::NoTest => {
-            run_simulation(&config, &matches, &mut gossip_stats_collection);
+            for i in 0..config.num_simulations {
+                run_simulation(&config, &matches, &mut gossip_stats_collection, i);
+            }
         }
     }
 
@@ -522,7 +558,7 @@ mod tests {
         active_set_size: usize,
     ) {
         for node in nodes {
-            node.run_gossip(rng, stakes, active_set_size, true);
+            node.initialize_gossip(rng, stakes, active_set_size, true);
         }
     }
 
@@ -632,7 +668,7 @@ mod tests {
                     .iter()
                     .map(|node| (node.pubkey(), node))
                     .collect();
-                cluster.new_mst(origin_pubkey, &stakes, &node_map);
+                cluster.run_gossip(origin_pubkey, &stakes, &node_map);
             }
             // in this test all nodes should be visited
             assert_eq!(cluster.get_visited_len(), 6);
