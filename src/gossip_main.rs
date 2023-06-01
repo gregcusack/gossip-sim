@@ -202,7 +202,7 @@ fn validate_testing(val: &str) -> Result<(), String> {
 }
 
 
-pub fn run_gossip(
+pub fn initialize_gossip(
     // nodes: &[RwLock<Node>],
     nodes: &mut Vec<Node>,
     stakes: &HashMap<Pubkey, /*stake:*/ u64>,
@@ -212,7 +212,7 @@ pub fn run_gossip(
     
     nodes.par_iter_mut().for_each(|node| {
         let mut local_rng = rng.clone();
-        node.run_gossip(&mut local_rng, stakes, active_set_size, false);
+        node.initialize_gossip(&mut local_rng, stakes, active_set_size, false);
     });
 
     Ok(())
@@ -285,7 +285,7 @@ fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection
     
     //collect vector of nodes
     info!("Simulating Gossip and setting active sets. Please wait.....");
-    let _res = run_gossip(&mut nodes, &stakes, config.gossip_active_set_size).unwrap();
+    let _res = initialize_gossip(&mut nodes, &stakes, config.gossip_active_set_size).unwrap();
     info!("Simulation Complete!");
 
     let mut cluster: Cluster = Cluster::new(config.gossip_push_fanout);
@@ -315,7 +315,7 @@ fn run_simulation(config: &Config, matches: &ArgMatches, gossip_stats_collection
                 .iter()
                 .map(|node| (node.pubkey(), node))
                 .collect();
-            cluster.new_mst(origin_pubkey, &stakes, &node_map);
+            cluster.run_gossip(origin_pubkey, &stakes, &node_map);
         }
         
         // info!("Calculation Complete. Printing results...");
@@ -558,7 +558,7 @@ mod tests {
         active_set_size: usize,
     ) {
         for node in nodes {
-            node.run_gossip(rng, stakes, active_set_size, true);
+            node.initialize_gossip(rng, stakes, active_set_size, true);
         }
     }
 
@@ -668,7 +668,7 @@ mod tests {
                     .iter()
                     .map(|node| (node.pubkey(), node))
                     .collect();
-                cluster.new_mst(origin_pubkey, &stakes, &node_map);
+                cluster.run_gossip(origin_pubkey, &stakes, &node_map);
             }
             // in this test all nodes should be visited
             assert_eq!(cluster.get_visited_len(), 6);

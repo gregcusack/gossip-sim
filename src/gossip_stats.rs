@@ -1498,7 +1498,7 @@ mod tests {
         active_set_size: usize,
     ) {
         for node in nodes {
-            node.run_gossip(rng, stakes, active_set_size, true);
+            node.initialize_gossip(rng, stakes, active_set_size, true);
         }
     }
 
@@ -1617,7 +1617,7 @@ mod tests {
                     .iter()
                     .map(|node| (node.pubkey(), node))
                     .collect();
-                cluster.new_mst(origin_pubkey, &stakes, &node_map);
+                cluster.run_gossip(origin_pubkey, &stakes, &node_map);
             }
 
             match cluster.relative_message_redundancy() {

@@ -442,7 +442,7 @@ impl Cluster {
         }
     }
 
-    pub fn new_mst(
+    pub fn run_gossip(
         &mut self,
         origin_pubkey: &Pubkey,
         stakes: &HashMap<Pubkey, u64>,
@@ -740,7 +740,7 @@ impl Node {
         self.num_gossip_rounds
     }
 
-    pub fn run_gossip<R: Rng>(
+    pub fn initialize_gossip<R: Rng>(
         &mut self,
         rng: &mut R,
         stakes: &HashMap<Pubkey, u64>,
@@ -971,7 +971,7 @@ mod tests {
         active_set_size: usize,
     ) {
         for node in nodes {
-            node.run_gossip(rng, stakes, active_set_size, true);
+            node.initialize_gossip(rng, stakes, active_set_size, true);
         }
     }
 
@@ -1011,7 +1011,7 @@ mod tests {
 
         let mut cluster: Cluster = Cluster::new(PUSH_FANOUT);
         let origin_pubkey = &pubkey; //just a temp origin selection
-        cluster.new_mst(origin_pubkey, &stakes, &node_map);
+        cluster.run_gossip(origin_pubkey, &stakes, &node_map);
 
         // verify buckets
         let mut keys = stakes.keys().cloned().collect::<Vec<_>>();
