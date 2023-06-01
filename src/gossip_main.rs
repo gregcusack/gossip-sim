@@ -29,6 +29,7 @@ use {
     },
     rand::rngs::StdRng,
     rand::SeedableRng,
+    rayon::prelude::*,
 };
 
 fn parse_matches() -> ArgMatches {
@@ -207,12 +208,13 @@ pub fn run_gossip(
     stakes: &HashMap<Pubkey, /*stake:*/ u64>,
     active_set_size: usize,
 ) -> Result<(), Error> {
-    let mut rng = rand::thread_rng();
-    // let mut rng = ChaChaRng::from_seed([189u8; 32]);
-    for node in nodes {
-        node.run_gossip(&mut rng, stakes, active_set_size, false);
-    }
+    let rng = StdRng::from_entropy();
     
+    nodes.par_iter_mut().for_each(|node| {
+        let mut local_rng = rng.clone();
+        node.run_gossip(&mut local_rng, stakes, active_set_size, false);
+    });
+
     Ok(())
 }
 
