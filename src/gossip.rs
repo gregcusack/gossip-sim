@@ -109,7 +109,7 @@ pub struct Config<'a> {
     pub test_type: Testing,
     pub num_simulations: usize,
     pub step_size: StepSize,
-    pub warm_up_rounds: usize,
+
 }
 
 pub struct Cluster {
@@ -138,6 +138,7 @@ pub struct Cluster {
 
     // store the adjacency list the MST. src_pubkey => HashSet<dst_pubkey>
     mst: HashMap<Pubkey, HashSet<Pubkey>>, 
+
     // get all nodes a src is pushing too
     // src_node => dst_nodes {A, B, C, ..., N}
     pushes: HashMap<Pubkey, HashSet<Pubkey>>,
@@ -153,10 +154,6 @@ pub struct Cluster {
     // for testing purposes. Can fail a certain percentage of nodes.
     // Failed nodes are picked randomly. and when they fail they are set here
     failed_nodes: HashSet<Pubkey>,
-
-    // count total prunes per iteration. 
-    // will help determine steady state and required warmup rounds
-    total_prunes: usize,
 }
 
 impl Cluster {
@@ -175,7 +172,6 @@ impl Cluster {
             pushes: HashMap::new(),
             rmr: gossip_stats::RelativeMessageRedundancy::default(),
             failed_nodes: HashSet::new(),
-            total_prunes: 0,
         }
     }
 
@@ -190,7 +186,6 @@ impl Cluster {
         self.prunes.clear();
         self.pushes.clear();
         self.rmr.reset();
-        self.total_prunes = 0;
     }
 
     pub fn get_outbound_degree(
@@ -634,13 +629,16 @@ impl Cluster {
             self.prunes
                 .insert(node.pubkey(), prunes);
         }
+
     }
 
     // pruner has sent prunes to a bunch of nodes. we are going to handle
     // those prunes from the side of the nodes (aka the prunees)
     pub fn prune_connections(
         &mut self,
+        // origin: &Pubkey,
         node_map: &HashMap<Pubkey, &Node>,
+        // nodes: &mut Vec<Node>,
         stakes: &HashMap<Pubkey, u64>,
     ) {
         // pruner: sending the prunes.
@@ -648,9 +646,7 @@ impl Cluster {
         for (pruner, prunes) in &self.prunes {
             // loop through prunes to get the peers that have received prune messages
             // from the pruner.
-            if prunes.len() > 0 {
-                self.total_prunes += prunes.len();
-            }
+            debug!("len prunes: {}", prunes.len());
             for (current_pubkey, origins) in prunes {
                 // now we switch into the context of the prunee. 
                 // prunee now has to process the prune messages. so we do that here
@@ -664,7 +660,7 @@ impl Cluster {
                 }
             }
         }
-        trace!("total prunes: {}", self.total_prunes);
+
     }
 
     pub fn chance_to_rotate<R: Rng>(
@@ -700,8 +696,17 @@ impl Cluster {
             nodes[i].fail_node();
             self.failed_nodes.insert(nodes[i].pubkey());
         }
+
         info!("Total nodes failed: {}", total_nodes_to_fail);
+        // info!("Failed nodes: ");
+        // for node in failed_nodes {
+        //     info!("{:?}", node);
+        // }
+
+
     }
+
+
 }
 
 pub struct Node {

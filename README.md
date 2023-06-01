@@ -73,10 +73,7 @@ cargo run --bin gossip-sim --
     --stake-threshold <min-stake-threshold>
     --filter-zero-staked-nodes
     --num-buckets <num-buckets-for-histogram>
-    --warm-up-rounds <warm_up_rounds>
 ```
-Note: `warm-up-rounds` sets the number of gossip iterations to run before collecting gossip statistics [default: 300]. It allows gossip to reach a sort of steady state. Without this, Gossip Statistics will include transient stats measued during the initial creation of the MST.
-
 #### Option 3: Pull accounts from mainnet and run simulation
 - This will pull all node accounts from mainnet and simulate the network.
 ```
@@ -90,7 +87,6 @@ cargo run --bin gossip-sim --
     --stake-threshold <min-stake-threshold>
     --filter-zero-staked-nodes
     --num-buckets <num-buckets-for-histogram>
-    --warm-up-rounds <warm_up_rounds>
 ```
 
 #### Option 4: Pull accounts, run multiple simulations, change specific config param
@@ -109,7 +105,6 @@ cargo run --bin gossip-sim --
     --test-type <test-type>
     --num-simulations <num-simulations>
     --step-size <step-size>
-    --warm-up-rounds <warm_up_rounds>
 ```
 `test-type` is an Enum that can be set to one of the following:
 ```
@@ -141,9 +136,10 @@ cargo run --bin gossip-sim --
     --fail-nodes
     --when-to-fail <gossip-iteration-to-fail-nodes-on>
     --fraction-to-fail <fraction-of-nodes-to-fail (0 < f < 1)>
-    --warm-up-rounds <warm_up_rounds>
 ```
 `fraction-to-fail` * total-nodes will fail right before the `when-to-fail`-th gossip iteration is run
+
+
 
 ## Interpreting the output
 Prints out coverage, RMR, Aggregate Hop info, LDH, stranded nodes
