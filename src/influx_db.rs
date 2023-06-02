@@ -68,42 +68,44 @@ impl InfluxDB {
         )
     }
 
-
-
-    pub fn report_data_point(
+    pub fn send_data_points(
         &self,
+    ) {
+        debug!("datapoint: {:?}", self.datapoints);
+
+        let url = self.url.clone();
+        let database = self.database.clone();
+        let datapoints = self.datapoints.clone();
+
+        std::thread::spawn(move || {
+            ReportToInflux::send(url, database, datapoints);
+        });
+    }
+
+    pub fn create_data_point(
+        &mut self,
         data: f64,
         stat_type: String,
         gossip_iteration: usize,
         simulation_iteration: usize,
     ) {
-
-        let data_point = format!("{} simulation_iter={},gossip_iter={},data={}",
+        let data_point = format!("{} simulation_iter={},gossip_iter={},data={}\n",
             stat_type, 
             simulation_iteration,
             gossip_iteration,
             data);
         
-
-        debug!("datapoint: {:?}", data_point);
-
-        let url = self.url.clone();
-        let database = self.database.clone();
-
-        std::thread::spawn(move || {
-            ReportToInflux::send(url, database, data_point);
-        });
-
+        self.datapoints.push_str(data_point.as_str());
     }
 
-    pub fn report_hops_stat_point(
-        &self,
+    pub fn create_hops_stat_point(
+        &mut self,
         data: &HopsStat,
         gossip_iteration: usize,
         simulation_iteration: usize,
     ) {
 
-        let data_point = format!("{} simulation_iter={},gossip_iter={},mean={},median={},max={}",
+        let data_point = format!("{} simulation_iter={},gossip_iter={},mean={},median={},max={}\n",
             "hops_stat".to_string(), 
             simulation_iteration,
             gossip_iteration,
@@ -112,24 +114,17 @@ impl InfluxDB {
             data.max()
         );
 
-        debug!("datapoint: {:?}", data_point);
-
-        let url = self.url.clone();
-        let database = self.database.clone();
-
-        std::thread::spawn(move || {
-            ReportToInflux::send(url, database, data_point);
-        });
+        self.datapoints.push_str(data_point.as_str());
     }
 
-    pub fn report_stranded_node_point(
-        &self,
+    pub fn create_stranded_node_stat_point(
+        &mut self,
         data: &StrandedNodeStats,
         gossip_iteration: usize,
         simulation_iteration: usize,
     ) {
 
-        let data_point = format!("{} simulation_iter={},gossip_iter={},count={},mean={},median={},max={},min={}",
+        let data_point = format!("{} simulation_iter={},gossip_iter={},count={},mean={},median={},max={},min={}\n",
             "stranded_node_stats".to_string(), 
             simulation_iteration,
             gossip_iteration,
@@ -140,13 +135,6 @@ impl InfluxDB {
             data.min(),
         );
 
-        debug!("datapoint: {:?}", data_point);
-
-        let url = self.url.clone();
-        let database = self.database.clone();
-
-        std::thread::spawn(move || {
-            ReportToInflux::send(url, database, data_point);
-        });
+        self.datapoints.push_str(data_point.as_str());
     }
 }

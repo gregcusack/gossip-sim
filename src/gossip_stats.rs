@@ -1,5 +1,3 @@
-use std::default;
-
 use {
     crate::{Stats, HopsStats},
     log::{info, error, warn, debug},

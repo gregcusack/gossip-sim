@@ -252,7 +252,7 @@ fn run_simulation(
     config: &Config, 
     matches: &ArgMatches, 
     gossip_stats_collection: &mut GossipStatsCollection, 
-    influx_db: &InfluxDB, 
+    influx_db: &mut InfluxDB, 
     simulation_iteration: usize
 ) {
     info!("##### SIMULATION ITERATION: {} #####", simulation_iteration);
@@ -370,7 +370,7 @@ fn run_simulation(
             }
 
             stats.insert_coverage(coverage);
-            influx_db.report_data_point(
+            influx_db.create_data_point(
                 coverage,
                 "coverage".to_string(), 
                 steady_state_iteration,
@@ -378,7 +378,7 @@ fn run_simulation(
             );
 
             stats.insert_hops_stat(cluster.get_distances());
-            influx_db.report_hops_stat_point(
+            influx_db.create_hops_stat_point(
                 stats.get_hops_stat_by_iteration(steady_state_iteration),
                 steady_state_iteration,
                 simulation_iteration
@@ -387,7 +387,7 @@ fn run_simulation(
             match cluster.relative_message_redundancy() {
                 Ok(result) => {
                     stats.insert_rmr(result);
-                    influx_db.report_data_point(
+                    influx_db.create_data_point(
                         result,
                         "rmr".to_string(), 
                         steady_state_iteration,
@@ -401,7 +401,7 @@ fn run_simulation(
                 &cluster.stranded_nodes(), 
                 &stakes
             );
-            influx_db.report_stranded_node_point(
+            influx_db.create_stranded_node_stat_point(
                 stats.get_stranded_node_stats_by_iteration(steady_state_iteration),
                 steady_state_iteration,
                 simulation_iteration
@@ -413,15 +413,14 @@ fn run_simulation(
             }
 
             stats.calculate_outbound_branching_factor(cluster.get_pushes());
-            influx_db.report_data_point(
+            influx_db.create_data_point(
                 stats.get_outbound_branching_factor_by_index(steady_state_iteration),
                 "branching_factor".to_string(), 
                 steady_state_iteration,
                 simulation_iteration
             );
 
-
-
+            influx_db.send_data_points();
         }
     }
     if !stats.is_empty() {
@@ -489,7 +488,7 @@ fn main() {
             config.warm_up_rounds);
     }
 
-    let influx_db = InfluxDB::new(
+    let mut influx_db = InfluxDB::new(
         gossip_sim::get_influx_url(
             matches.value_of("influx_url")
             .unwrap_or_default()
@@ -511,7 +510,7 @@ fn main() {
                 config.gossip_active_set_size = active_set_size;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &influx_db, i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, &mut influx_db, i);
             }
         }
         Testing::PushFanout => {
@@ -526,7 +525,7 @@ fn main() {
                 config.gossip_push_fanout = push_fanout;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &influx_db, i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, &mut influx_db, i);
             }
 
         }
@@ -542,7 +541,7 @@ fn main() {
                 config.min_ingress_nodes = min_ingress_nodes;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &influx_db, i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, &mut influx_db, i);
             }
         }
         Testing::MinStakeThreshold => {
@@ -557,7 +556,7 @@ fn main() {
                 config.prune_stake_threshold = prune_stake_threshold;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &influx_db, i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, &mut influx_db, i);
             }
         }
         Testing::OriginRank => {
@@ -572,12 +571,12 @@ fn main() {
                 config.origin_rank = origin_rank;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &influx_db, i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, &mut influx_db, i);
             }
         }
         Testing::NoTest => {
             for i in 0..config.num_simulations {
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &influx_db, i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, &mut influx_db, i);
             }
         }
     }
