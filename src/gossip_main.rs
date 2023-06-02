@@ -401,6 +401,12 @@ fn run_simulation(
                 &cluster.stranded_nodes(), 
                 &stakes
             );
+            influx_db.report_stranded_node_point(
+                stats.get_stranded_node_stats_by_iteration(steady_state_iteration),
+                steady_state_iteration,
+                simulation_iteration
+            );
+
             
             if log::log_enabled!(Level::Debug) {
                 cluster.print_pushes();
