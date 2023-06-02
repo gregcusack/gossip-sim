@@ -155,7 +155,7 @@ impl HopsStatCollection {
     }
 
     pub fn get_stat_by_iteration(
-        &mut self,
+        &self,
         index: usize,
     ) -> &HopsStat {
         &self.per_round_stats[index]
@@ -954,6 +954,13 @@ impl GossipStats {
                 .collect());
     }
 
+    pub fn get_hops_stat_by_iteration(
+        &self,
+        index: usize,
+    ) -> &HopsStat {
+        &self.hops_stats.get_stat_by_iteration(index)
+    }
+
     pub fn print_hops_stats(
         &self,
     ) {
@@ -1101,6 +1108,12 @@ impl GossipStats {
             self.coverage_stats.max(),
             self.coverage_stats.min(),
         )
+    }
+
+    pub fn get_coverage_stat_collection(
+        &self,
+    ) -> &StatCollection {
+        &self.coverage_stats
     }
 
     pub fn print_coverage_stats(

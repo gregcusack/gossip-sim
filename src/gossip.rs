@@ -90,7 +90,7 @@ impl From<StepSize> for f64 {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Config<'a> {
     pub gossip_push_fanout: usize,
     pub gossip_active_set_size: usize,
