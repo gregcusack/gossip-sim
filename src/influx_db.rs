@@ -2,7 +2,7 @@ use {
     url::Url,
     reqwest,
     tokio,
-    log::{error, debug, trace},
+    log::{error, info, debug, trace},
     crate::gossip_stats::{
         HopsStat,
         StrandedNodeStats,
@@ -80,6 +80,7 @@ impl InfluxDB {
 
     ) -> Result<Self, url::ParseError> {
         let url = Url::parse(endpoint)?;
+        info!("url 0on creation: {:?}", url);
         Ok(
             Self { 
                 url,
