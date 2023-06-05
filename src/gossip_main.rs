@@ -437,10 +437,10 @@ fn run_simulation(
             }
         }
     }
-    // if !stats.is_empty() {
-    //     stats.run_all_calculations(config.num_buckets_for_stranded_node_hist);
-    //     gossip_stats_collection.push(stats.clone());
-    // }
+    if !stats.is_empty() {
+        stats.run_all_calculations(config.num_buckets_for_stranded_node_hist);
+        gossip_stats_collection.push(stats.clone());
+    }
 }
 
 fn main() {
