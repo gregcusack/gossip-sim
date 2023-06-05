@@ -162,16 +162,16 @@ cargo run --bin gossip-sim --
     --when-to-fail <gossip-iteration-to-fail-nodes-on>
     --fraction-to-fail <fraction-of-nodes-to-fail (0 < f < 1)>
     --warm-up-rounds <warm_up_rounds>
-    --influx-url <localhost-or-internal-metrics.solana.com, l or i>
+    --influx <localhost-or-internal-metrics.solana.com, l or i>
 ```
-`influx-url` lets you push metrics to either a localhost or remote influx db instance
+`influx` lets you push metrics to either a localhost or remote influx db instance
 - options are: `i` to push to internal-metrics.solana.com or `l` to push to a localhost influx instance.
-- you are welcome to leave out `--influx-url`. This will just let you run a standard experiment without influx integration
-- If you do set `--influx-url i`, you must set the following environment variables in a `.env` file in your root director
+- you are welcome to leave out `--influx`. This will just let you run a standard experiment without influx integration
+- If you do set `--influx i`, you must set the following environment variables in a `.env` file in your root director
     - GOSSIP_SIM_INFLUX_USERNAME=<influx-username>
     - GOSSIP_SIM_INFLUX_PASSWORD=<influx-password>
     - GOSSIP_SIM_INFLUX_DATABASE=<influx-database-name>
-- If you do set `--influx-url l`, you will still need the `.env` file to get the database name of your localhost instance.
+- If you do set `--influx l`, you will still need the `.env` file to get the database name of your localhost instance.
 
 
 ## Interpreting the output

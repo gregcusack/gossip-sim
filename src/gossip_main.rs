@@ -204,11 +204,10 @@ fn parse_matches() -> ArgMatches {
                 .help("Number of gossip rounds to run before measuring statistics"),
         )
         .arg(
-            Arg::with_name("influx_url")
-                .long("influx-url")
+            Arg::with_name("influx")
+                .long("influx")
                 .takes_value(true)
-                // .default_value(INFLUX_LOCALHOST)
-                .help("Influx url for reporing metrics"),
+                .help("Influx for reporing metrics. i for internal-metrics, l for localhost"),
         )
         .get_matches()
 }
@@ -500,8 +499,8 @@ fn main() {
     }
 
     // check if we are going to push data to influx
-    // if --influx-url set, we are pushing to influx
-    let mut influx_db: Option<Rc<RefCell<InfluxDB>>> = if let Some(influx_url) = matches.value_of("influx_url") {
+    // if --influx set, we are pushing to influx
+    let mut influx_db: Option<Rc<RefCell<InfluxDB>>> = if let Some(influx_url) = matches.value_of("influx") {
         if let Err(err) = load_influx_env_vars() {
             error!("Failed to load environment variables: {}", err);
             return;
