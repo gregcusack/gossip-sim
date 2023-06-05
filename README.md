@@ -172,7 +172,8 @@ cargo run --bin gossip-sim --
     - GOSSIP_SIM_INFLUX_PASSWORD=<influx-password>
     - GOSSIP_SIM_INFLUX_DATABASE=<influx-database-name>
 - If you do set `--influx l`, you will still need the `.env` file to get the database name of your localhost instance.
-
+- We push `rmr`, `coverage`, `hops_stat`, `branching_factor`, and `stranded_node_stats` to influx. NOTE: each of thesea are held in their own series.
+- If you want to query `coverage` series for example. Run: `select * from coverage` from the `influx>` command line
 
 ## Interpreting the output
 Prints out coverage, RMR, Aggregate Hop info, LDH, stranded nodes
