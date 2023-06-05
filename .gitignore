@@ -17,3 +17,4 @@ src/configs/mainnet_stakes.yaml
 *.yaml
 notes/
 data/
+*.env

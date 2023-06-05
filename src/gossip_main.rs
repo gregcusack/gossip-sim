@@ -1,4 +1,4 @@
-use gossip_sim::INFLUX_LOCALHOST;
+use gossip_sim::{INFLUX_LOCALHOST, influx_db};
 
 use {
     clap::{crate_description, crate_name, App, Arg, ArgMatches, value_t_or_exit},
@@ -29,10 +29,14 @@ use {
         collections::{HashMap, BinaryHeap},
         process::exit,
         cmp::Reverse,
+        env,
+        rc::Rc,
+        cell::RefCell,
     },
     rand::rngs::StdRng,
     rand::SeedableRng,
     rayon::prelude::*,
+    dotenv::dotenv,
 };
 
 fn parse_matches() -> ArgMatches {
@@ -205,12 +209,16 @@ fn parse_matches() -> ArgMatches {
             Arg::with_name("influx_url")
                 .long("influx-url")
                 .takes_value(true)
-                .default_value(INFLUX_LOCALHOST)
+                // .default_value(INFLUX_LOCALHOST)
                 .help("Influx url for reporing metrics"),
         )
         .get_matches()
 }
 
+
+fn load_influx_env_vars() -> Result<(), dotenv::Error> {
+    dotenv().map(|_| ())
+}
 
 fn validate_testing(val: &str) -> Result<(), String> {
     val.parse::<Testing>()
@@ -252,8 +260,8 @@ fn run_simulation(
     config: &Config, 
     matches: &ArgMatches, 
     gossip_stats_collection: &mut GossipStatsCollection, 
-    influx_db: &mut InfluxDB, 
-    simulation_iteration: usize
+    influx_db: Option<&mut Rc<RefCell<InfluxDB>>>,
+    simulation_iteration: usize,
 ) {
     info!("##### SIMULATION ITERATION: {} #####", simulation_iteration);
     // check if we want to read in pubkeys/stakes from a file
@@ -363,36 +371,29 @@ fn run_simulation(
             let steady_state_iteration = gossip_iteration - config.warm_up_rounds;
             let (coverage, stranded_nodes) = cluster.coverage(&stakes);
             debug!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
-            debug!("{} nodes are stranded", stranded_nodes);
+            info!("{} nodes are stranded out of {} nodes", stranded_nodes, nodes.len());
             if coverage < poor_coverage_threshold {
                 warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
                 _number_of_poor_coverage_runs += 1;
             }
 
             stats.insert_coverage(coverage);
-            influx_db.create_data_point(
-                coverage,
-                "coverage".to_string(), 
-                steady_state_iteration,
-                simulation_iteration
-            );
+
 
             stats.insert_hops_stat(cluster.get_distances());
-            influx_db.create_hops_stat_point(
-                stats.get_hops_stat_by_iteration(steady_state_iteration),
-                steady_state_iteration,
-                simulation_iteration
-            );
+            
 
             match cluster.relative_message_redundancy() {
                 Ok(result) => {
                     stats.insert_rmr(result);
-                    influx_db.create_data_point(
-                        result,
-                        "rmr".to_string(), 
-                        steady_state_iteration,
-                        simulation_iteration
-                    );
+                    if let Some(ref db) = influx_db {
+                        db.borrow_mut().create_data_point(
+                            result,
+                            "rmr".to_string(), 
+                            steady_state_iteration,
+                            simulation_iteration
+                        );
+                    }
                 },
                 Err(_) => error!("Network RMR error. # of nodes is 1."),
             }
@@ -401,26 +402,48 @@ fn run_simulation(
                 &cluster.stranded_nodes(), 
                 &stakes
             );
-            influx_db.create_stranded_node_stat_point(
-                stats.get_stranded_node_stats_by_iteration(steady_state_iteration),
-                steady_state_iteration,
-                simulation_iteration
-            );
-
             
             if log::log_enabled!(Level::Debug) {
                 cluster.print_pushes();
             }
 
             stats.calculate_outbound_branching_factor(cluster.get_pushes());
-            influx_db.create_data_point(
-                stats.get_outbound_branching_factor_by_index(steady_state_iteration),
-                "branching_factor".to_string(), 
-                steady_state_iteration,
-                simulation_iteration
-            );
 
-            influx_db.send_data_points();
+            if let Some(ref db) = influx_db {
+                db.borrow_mut().create_data_point(
+                    coverage,
+                    "coverage".to_string(), 
+                    steady_state_iteration,
+                    simulation_iteration
+                );
+
+                db.borrow_mut().create_hops_stat_point(
+                    stats.get_hops_stat_by_iteration(steady_state_iteration),
+                    steady_state_iteration,
+                    simulation_iteration
+                );
+
+                db.borrow_mut().create_stranded_node_stat_point(
+                    stats.get_stranded_node_stats_by_iteration(steady_state_iteration),
+                    steady_state_iteration,
+                    simulation_iteration
+                );
+
+                db.borrow_mut().create_data_point(
+                    stats.get_outbound_branching_factor_by_index(steady_state_iteration),
+                    "branching_factor".to_string(), 
+                    steady_state_iteration,
+                    simulation_iteration
+                );
+
+                db.borrow_mut().create_data_point(
+                    stats.get_outbound_branching_factor_by_index(steady_state_iteration),
+                    "branching_factor".to_string(), 
+                    steady_state_iteration,
+                    simulation_iteration
+                );
+                db.borrow().send_data_points();
+            }
         }
     }
     if !stats.is_empty() {
@@ -488,11 +511,38 @@ fn main() {
             config.warm_up_rounds);
     }
 
-    let mut influx_db = InfluxDB::new(
-        gossip_sim::get_influx_url(
-            matches.value_of("influx_url")
-            .unwrap_or_default()
-        )).unwrap();
+    // check if we are going to push data to influx
+    // if --influx-url set, we are pushing to influx
+    // let mut influx_db: Option<&mut InfluxDB> = None;
+    let mut influx_db: Option<Rc<RefCell<InfluxDB>>> = if let Some(influx_url) = matches.value_of("influx_url") {
+        if let Err(err) = load_influx_env_vars() {
+            error!("Failed to load environment variables: {}", err);
+            return;
+        }
+    
+        Some(Rc::new(RefCell::new(InfluxDB::new(
+            gossip_sim::get_influx_url(
+                influx_url
+            ),
+            env::var("GOSSIP_SIM_INFLUX_USERNAME")
+                .unwrap_or_else(|_| {
+                    error!("GOSSIP_SIM_INFLUX_USERNAME is not set");
+                    exit(1);
+                }),
+                env::var("GOSSIP_SIM_INFLUX_PASSWORD")
+                .unwrap_or_else(|_| {
+                    error!("GOSSIP_SIM_INFLUX_PASSWORD is not set");
+                    exit(1);
+                }),
+                env::var("GOSSIP_SIM_INFLUX_DATABASE")
+                .unwrap_or_else(|_| {
+                    error!("GOSSIP_SIM_INFLUX_DATABASE is not set");
+                    exit(1);
+                })
+        ).unwrap())))
+    } else {
+        None
+    };
 
     let mut gossip_stats_collection = GossipStatsCollection::default();
     gossip_stats_collection.set_number_of_simulations(config.num_simulations);
@@ -510,7 +560,7 @@ fn main() {
                 config.gossip_active_set_size = active_set_size;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &mut influx_db, i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, influx_db.as_mut(), i);
             }
         }
         Testing::PushFanout => {
@@ -525,7 +575,7 @@ fn main() {
                 config.gossip_push_fanout = push_fanout;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &mut influx_db, i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, influx_db.as_mut(), i);
             }
 
         }
@@ -541,7 +591,7 @@ fn main() {
                 config.min_ingress_nodes = min_ingress_nodes;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &mut influx_db, i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, influx_db.as_mut(), i);
             }
         }
         Testing::MinStakeThreshold => {
@@ -556,7 +606,7 @@ fn main() {
                 config.prune_stake_threshold = prune_stake_threshold;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &mut influx_db, i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, influx_db.as_mut(), i);
             }
         }
         Testing::OriginRank => {
@@ -571,21 +621,21 @@ fn main() {
                 config.origin_rank = origin_rank;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &mut influx_db, i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, influx_db.as_mut(), i);
             }
         }
         Testing::NoTest => {
             for i in 0..config.num_simulations {
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &mut influx_db, i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, influx_db.as_mut(), i);
             }
         }
     }
 
-    if !gossip_stats_collection.is_empty() {
-        gossip_stats_collection.print_all(config.gossip_iterations, config.warm_up_rounds, config.test_type);
-    } else {
-        warn!("WARNING: Gossip Stats Collection is empty. Is `Iterations` <= `warm-up-rounds`?");
-    }
+    // if !gossip_stats_collection.is_empty() {
+    //     gossip_stats_collection.print_all(config.gossip_iterations, config.warm_up_rounds, config.test_type);
+    // } else {
+    //     warn!("WARNING: Gossip Stats Collection is empty. Is `Iterations` <= `warm-up-rounds`?");
+    // }
 }
 
 #[cfg(test)]

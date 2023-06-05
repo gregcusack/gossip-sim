@@ -2,7 +2,7 @@ use {
     url::Url,
     reqwest,
     tokio,
-    log::{error, debug, trace},
+    log::{error, debug, info, trace},
     crate::gossip_stats::{
         HopsStat,
         StrandedNodeStats,
@@ -22,6 +22,8 @@ impl ReportToInflux {
     ) {
         let client = reqwest::Client::new();
         let influx_url = url.join("write").unwrap();
+
+        info!("influx url: {:?}", influx_url);
         
         // Send the request without awaiting the response
         let response = 
@@ -53,17 +55,27 @@ pub struct InfluxDB {
     url: Url,
     database: String,
     datapoints: String,
-
+    username: String,
+    password: String,
 }
 
 impl InfluxDB {
-    pub fn new(endpoint: &str) -> Result<Self, url::ParseError> {
+    pub fn new(
+        endpoint: &str,
+        username: String,
+        password: String,
+        database: String,
+
+    ) -> Result<Self, url::ParseError> {
         let url = Url::parse(endpoint)?;
+        info!("url on creation: {:?}", url);
         Ok(
             Self { 
                 url,
-                database: DATABASE_NAME.to_string(),
+                database: database,
                 datapoints: "".to_string(),
+                username: username,
+                password: password,
             }
         )
     }
@@ -71,7 +83,7 @@ impl InfluxDB {
     pub fn send_data_points(
         &self,
     ) {
-        debug!("datapoint: {:?}", self.datapoints);
+        info!("datapoint: {:?}", self.datapoints);
 
         let url = self.url.clone();
         let database = self.database.clone();
