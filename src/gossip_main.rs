@@ -376,11 +376,8 @@ fn run_simulation(
             }
 
             stats.insert_coverage(coverage);
-
-
             stats.insert_hops_stat(cluster.get_distances());
             
-
             match cluster.relative_message_redundancy() {
                 Ok(result) => {
                     stats.insert_rmr(result);
