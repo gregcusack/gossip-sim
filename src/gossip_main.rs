@@ -621,11 +621,11 @@ fn main() {
         }
     }
 
-    // if !gossip_stats_collection.is_empty() {
-    //     gossip_stats_collection.print_all(config.gossip_iterations, config.warm_up_rounds, config.test_type);
-    // } else {
-    //     warn!("WARNING: Gossip Stats Collection is empty. Is `Iterations` <= `warm-up-rounds`?");
-    // }
+    if !gossip_stats_collection.is_empty() {
+        gossip_stats_collection.print_all(config.gossip_iterations, config.warm_up_rounds, config.test_type);
+    } else {
+        warn!("WARNING: Gossip Stats Collection is empty. Is `Iterations` <= `warm-up-rounds`?");
+    }
 }
 
 #[cfg(test)]
