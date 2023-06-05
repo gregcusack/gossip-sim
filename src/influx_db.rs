@@ -9,8 +9,6 @@ use {
     },
 };
 
-pub const DATABASE_NAME: &str = "gossip_stats";
-
 pub struct ReportToInflux {}
 
 impl ReportToInflux {
@@ -148,7 +146,6 @@ impl InfluxDB {
         gossip_iteration: usize,
         simulation_iteration: usize,
     ) {
-
         let data_point = format!("{} simulation_iter={},gossip_iter={},count={},mean={},median={},max={},min={}\n",
             "stranded_node_stats".to_string(), 
             simulation_iteration,

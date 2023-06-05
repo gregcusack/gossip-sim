@@ -504,7 +504,6 @@ fn main() {
 
     // check if we are going to push data to influx
     // if --influx-url set, we are pushing to influx
-    // let mut influx_db: Option<&mut InfluxDB> = None;
     let mut influx_db: Option<Rc<RefCell<InfluxDB>>> = if let Some(influx_url) = matches.value_of("influx_url") {
         if let Err(err) = load_influx_env_vars() {
             error!("Failed to load environment variables: {}", err);
