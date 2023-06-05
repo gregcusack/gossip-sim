@@ -1,5 +1,3 @@
-use gossip_sim::{INFLUX_LOCALHOST, influx_db};
-
 use {
     clap::{crate_description, crate_name, App, Arg, ArgMatches, value_t_or_exit},
     log::{error, info, debug, warn, Level},
@@ -371,7 +369,7 @@ fn run_simulation(
             let steady_state_iteration = gossip_iteration - config.warm_up_rounds;
             let (coverage, stranded_nodes) = cluster.coverage(&stakes);
             debug!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
-            info!("{} nodes are stranded out of {} nodes", stranded_nodes, nodes.len());
+            debug!("{} nodes are stranded out of {} nodes", stranded_nodes, nodes.len());
             if coverage < poor_coverage_threshold {
                 warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
                 _number_of_poor_coverage_runs += 1;
@@ -425,13 +423,6 @@ fn run_simulation(
 
                 db.borrow_mut().create_stranded_node_stat_point(
                     stats.get_stranded_node_stats_by_iteration(steady_state_iteration),
-                    steady_state_iteration,
-                    simulation_iteration
-                );
-
-                db.borrow_mut().create_data_point(
-                    stats.get_outbound_branching_factor_by_index(steady_state_iteration),
-                    "branching_factor".to_string(), 
                     steady_state_iteration,
                     simulation_iteration
                 );

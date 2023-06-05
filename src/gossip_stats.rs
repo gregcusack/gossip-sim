@@ -544,11 +544,25 @@ impl StrandedNodeStats {
         stranded_nodes_vec: &Vec<Pubkey>,
         stakes: &HashMap<Pubkey, u64>,
     ) -> Self {
+        if stranded_nodes_vec.len() == 0 {
+            return Self::default()
+        }
+        
         let mut stranded_stakes: Vec<u64> = Vec::default();
         for pubkey in stranded_nodes_vec.iter() {
             stranded_stakes.push(
                 *stakes.get(pubkey).unwrap()
             )
+        }
+
+        if stranded_nodes_vec.len() == 1 {
+            return Self {
+                stranded_node_count: stranded_stakes.len(),
+                mean_stake: stranded_stakes[0] as f64,
+                median_stake: stranded_stakes[0] as f64,
+                max_stake: stranded_stakes[0],
+                min_stake: stranded_stakes[0],
+            }
         }
 
         stranded_stakes

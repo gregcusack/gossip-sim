@@ -2,7 +2,7 @@ use {
     url::Url,
     reqwest,
     tokio,
-    log::{error, debug, info, trace},
+    log::{error, debug, trace},
     crate::gossip_stats::{
         HopsStat,
         StrandedNodeStats,
@@ -18,17 +18,17 @@ impl ReportToInflux {
     pub async fn send(
         url: Url,
         database: String,
+        username: String,
+        password: String, 
         data_point: String,
     ) {
         let client = reqwest::Client::new();
         let influx_url = url.join("write").unwrap();
 
-        info!("influx url: {:?}", influx_url);
-        
-        // Send the request without awaiting the response
         let response = 
             client
                 .post(influx_url)
+                .basic_auth(username, Some(password))
                 .query(&[("db", database.as_str())])
                 .body(data_point)
                 .send()
@@ -46,6 +46,20 @@ impl ReportToInflux {
                 error!("Error reporting to InfluxDB: {}", err);
             }
         }
+    }
+
+    #[tokio::main]
+    pub async fn sender(
+        url: Url,
+        database: String,
+        username: String,
+        password: String, 
+        data_point: String,
+    ) {
+        async_std::task::spawn(async move {
+            ReportToInflux::send(url, database, username, password, data_point);
+        });
+
     }
 }
 
@@ -68,7 +82,6 @@ impl InfluxDB {
 
     ) -> Result<Self, url::ParseError> {
         let url = Url::parse(endpoint)?;
-        info!("url on creation: {:?}", url);
         Ok(
             Self { 
                 url,
@@ -83,15 +96,15 @@ impl InfluxDB {
     pub fn send_data_points(
         &self,
     ) {
-        info!("datapoint: {:?}", self.datapoints);
+        debug!("datapoint: {:?}", self.datapoints);
 
         let url = self.url.clone();
         let database = self.database.clone();
         let datapoints = self.datapoints.clone();
+        let username = self.username.clone();
+        let password = self.password.clone();
 
-        std::thread::spawn(move || {
-            ReportToInflux::send(url, database, datapoints);
-        });
+        ReportToInflux::sender(url, database, username, password, datapoints);
     }
 
     pub fn create_data_point(
