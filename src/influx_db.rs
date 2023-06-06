@@ -19,7 +19,8 @@ use {
 pub struct ReportToInflux {}
 
 impl ReportToInflux {
-    pub fn send(
+    #[tokio::main]
+    pub async fn send(
         url: Url,
         database: String,
         username: String,
@@ -39,26 +40,27 @@ impl ReportToInflux {
                 .basic_auth(username, Some(password))
                 .query(&[("db", database.as_str())])
                 .body(data_point)
-                .send();
-                // .await;
+                .send()
+                .await;
         
         info!("suhhhh");
 
-        // match response {
-        //     Ok(response) => {
-        //         if response.status().is_success() {
-        //             trace!("Data successfully reported to InfluxDB");
-        //         } else {
-        //             error!("Failed to report data to InfluxDB. Status: {}", response.status());
-        //         }
-        //     }
-        //     Err(err) => {
-        //         error!("Error reporting to InfluxDB: {}", err);
-        //     }
-        // }
+        match response {
+            Ok(response) => {
+                if response.status().is_success() {
+                    trace!("Data successfully reported to InfluxDB");
+                } else {
+                    error!("Failed to report data to InfluxDB. Status: {}", response.status());
+                }
+            }
+            Err(err) => {
+                error!("Error reporting to InfluxDB: {}", err);
+            }
+        }
     }
 
-    pub fn sender(
+    #[tokio::main]
+    pub async fn sender(
         url: Url,
         database: String,
         username: String,
@@ -66,9 +68,11 @@ impl ReportToInflux {
         data_point: String,
     ) {
         info!("in sender(): ");
-
+        async_std::task::spawn(async move {
+            ReportToInflux::send(url, database, username, password, data_point);
+        });
         // async_std::task::spawn(async move {
-        let _ = ReportToInflux::send(url, database, username, password, data_point);
+        // let _ = ReportToInflux::send(url, database, username, password, data_point);
         // });
 
     }
