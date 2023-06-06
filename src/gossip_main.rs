@@ -24,7 +24,7 @@ use {
     std::{
         fs::{File}, 
         path::Path, 
-        collections::{HashMap, BinaryHeap},
+        collections::{HashMap, BinaryHeap, VecDeque},
         process::exit,
         cmp::Reverse,
         env,
@@ -497,6 +497,8 @@ fn main() {
             config.gossip_iterations, 
             config.warm_up_rounds);
     }
+
+    let datapoint_queue: VecDeque<Inf>
 
     // check if we are going to push data to influx
     // if --influx set, we are pushing to influx
