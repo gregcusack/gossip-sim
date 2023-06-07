@@ -450,6 +450,10 @@ fn run_simulation(
             // }
         }
     }
+    let mut datapoint = InfluxDataPoint::default();
+    datapoint.set_last_datapoint();
+    datapoint_queue.lock().unwrap().push_back(datapoint);
+
     if !stats.is_empty() {
         stats.run_all_calculations(config.num_buckets_for_stranded_node_hist);
         gossip_stats_collection.push(stats.clone());
@@ -520,6 +524,7 @@ fn main() {
 
     let datapoint_queue: Arc<Mutex<VecDeque<InfluxDataPoint>>> = Arc::new(Mutex::new(VecDeque::new()));
     let influx_db_queue = datapoint_queue.clone();
+
     if let Err(err) = load_influx_env_vars() {
         error!("Failed to load environment variables: {}", err);
         return;

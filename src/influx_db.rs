@@ -1,3 +1,5 @@
+use std::default;
+
 use {
     url::Url,
     reqwest,
@@ -16,6 +18,8 @@ use {
 
 };
 
+static mut TRACKER: Option<Arc<Mutex<Tracker>>> = None;
+
 pub struct ReportToInflux {}
 
 impl ReportToInflux {
@@ -27,12 +31,11 @@ impl ReportToInflux {
         password: String, 
         data_point: String,
     ) {
-        info!("in send!");
         let client = reqwest::Client::new();
         let influx_url = url.join("write").unwrap();
 
-        info!("about to send: data_point: {}", data_point);
-        info!("url: {:?}", url);
+        debug!("about to send: data_point: {}", data_point);
+        debug!("url: {:?}", url);
 
         let response = 
             client
@@ -43,7 +46,6 @@ impl ReportToInflux {
                 .send()
                 .await;
         
-        info!("suhhhh");
 
         match response {
             Ok(response) => {
@@ -57,6 +59,12 @@ impl ReportToInflux {
                 error!("Error reporting to InfluxDB: {}", err);
             }
         }
+        unsafe {
+            if let Some(ref t) = TRACKER {
+                t.lock().unwrap().add_sent();
+            } 
+        }
+
     }
 
     #[tokio::main]
@@ -67,7 +75,6 @@ impl ReportToInflux {
         password: String, 
         data_point: String,
     ) {
-        info!("in sender(): ");
         async_std::task::spawn(async move {
             ReportToInflux::send(url, database, username, password, data_point);
         });
@@ -77,6 +84,52 @@ impl ReportToInflux {
 
     }
 
+}
+
+pub struct Tracker {
+    dequeued: usize,
+    sent: usize,
+}
+
+impl Default for Tracker {
+    fn default() -> Self {
+        Tracker {
+            dequeued: 0,
+            sent: 0,
+        }
+    }
+}
+
+impl Tracker {
+    pub fn add_dequeued(
+        &mut self,
+    ) {
+        self.dequeued += 1;
+    }
+
+    pub fn add_sent(
+        &mut self,
+    ) {
+        self.sent += 1;
+    }
+
+    pub fn get_dequeued(
+        &self,
+    ) -> usize {
+        self.dequeued
+    }
+
+    pub fn get_sent(
+        &self,
+    ) -> usize {
+        self.sent
+    }
+
+    pub fn equal(
+        &self,
+    ) -> bool {
+        self.sent == self.dequeued
+    }
 }
 
 pub struct InfluxThread { }
@@ -96,23 +149,47 @@ impl InfluxThread {
             password
         ).unwrap();
 
+        unsafe {
+            TRACKER = Some(Arc::new(Mutex::new(Tracker::default())));
+        }
+
+        let mut rx_last_datapoint = false;
+        let mut draining_queue_log_message_flag = false;
+
         loop {
             let datapoint = datapoint_queue.lock().unwrap().pop_front();
             
             if let Some(dp) = datapoint {
-                info!("front val: {}", dp.data());
+                // info!("front val: {}", dp.data());
                 if dp.last_datapoint() {
-                    info!("Last data point, returning");
-                    break;
+                    rx_last_datapoint = true;
+                } else {
+                    // info!("not last datapoint");
+                    influx_db.send_data_points(dp);
+    
+                    unsafe {
+                        if let Some(ref t) = TRACKER {
+                            t.lock().unwrap().add_dequeued();
+                        } 
+                    }
                 }
-
-                info!("not last datapoint");
-                influx_db.send_data_points(dp);
-
-            } else {
-                info!("deque empty");
             }
-            thread::sleep(std::time::Duration::from_millis(50));
+            if rx_last_datapoint {
+                if !draining_queue_log_message_flag {
+                    draining_queue_log_message_flag = true;
+                    info!("Last simulation datapoint recorded. Draining Queue...")
+                }
+                unsafe {
+                    // info!("Waiting to drain queue...");
+                    if let Some(ref t) = TRACKER {
+                        if t.lock().unwrap().equal() {
+                            // info!("Queue Drained. Exiting...");
+                            break;
+                        }
+                    } 
+                }
+            }
+            thread::sleep(std::time::Duration::from_millis(10));
         }
     }
 }
@@ -152,11 +229,9 @@ impl InfluxDB {
 
         let url = self.url.clone();
         let database = self.database.clone();
-        // let datapoints = self.datapoints.clone();
         let username = self.username.clone();
         let password = self.password.clone();
 
-        info!("sending to sender: ");
         let _ = ReportToInflux::sender(url, database, username, password, datapoint.data());
     }
 
@@ -181,6 +256,21 @@ impl InfluxDataPoint {
         &self,
     ) -> String {
         self.datapoint.clone()
+    }
+
+    pub fn set_start(
+        &mut self,
+    ) {
+        self.datapoint.push_str("start");
+    }
+
+    pub fn is_start(
+        &self,
+    ) -> bool {
+        if self.datapoint == "start" {
+            return true;
+        }
+        false
     }
 
     pub fn set_last_datapoint(
