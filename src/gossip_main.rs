@@ -344,20 +344,19 @@ fn run_simulation(
     datapoint.set_start();
     datapoint_queue.lock().unwrap().push_back(datapoint);
 
-    let mut datapoint = InfluxDataPoint::default();
-    datapoint.create_config_point(
-        config.gossip_push_fanout,
-        config.gossip_active_set_size,
-        config.origin_rank,
-        config.prune_stake_threshold,
-        config.min_ingress_nodes,
-    );
-    datapoint_queue.lock().unwrap().push_back(datapoint);
-
     info!("Calculating the MSTs for origin: {:?}, stake: {}", origin_pubkey, stakes.get(origin_pubkey).unwrap());
     for gossip_iteration in 0..config.gossip_iterations {
         if gossip_iteration % 10 == 0 {
             info!("MST ITERATION: {}", gossip_iteration);
+            let mut datapoint = InfluxDataPoint::default();
+            datapoint.create_config_point(
+                config.gossip_push_fanout,
+                config.gossip_active_set_size,
+                config.origin_rank,
+                config.prune_stake_threshold,
+                config.min_ingress_nodes,
+            );
+            datapoint_queue.lock().unwrap().push_back(datapoint);
         }
             
         if config.fail_nodes && gossip_iteration == config.when_to_fail {
@@ -384,10 +383,10 @@ fn run_simulation(
             cluster.prune_connections(&node_map, &stakes);
         }
 
-        let mut rng = rand::thread_rng();
-        cluster.chance_to_rotate(&mut rng, &mut nodes, config.gossip_active_set_size, &stakes, config.probability_of_rotation, &mut StdRng::from_entropy());
+        cluster.chance_to_rotate(&mut nodes, config.gossip_active_set_size, &stakes, config.probability_of_rotation);
 
-        // wait until after set number of warmup rounds to begin calculating gossip stats
+
+        // wait until after warmup rounds to begin calculating gossip stats and reporting to influx
         if gossip_iteration >= config.warm_up_rounds {
             // don't care about gossip_iteration 0->warm_up_rounds.
             // so create new variable that we are going to use for data-recorded iterations
@@ -450,7 +449,6 @@ fn run_simulation(
                 steady_state_iteration, 
                 simulation_iteration
             );
-
             datapoint_queue.lock().unwrap().push_back(datapoint);
         }
     }
@@ -838,10 +836,7 @@ mod tests {
                 cluster.prune_connections(&node_map, &stakes);
             }
 
-            let seed = [42u8; 32];
-            let mut rotate_seed_rng = StdRng::from_seed(seed);
-            let mut rotate_seed_rng_2 = StdRng::from_seed(seed);
-            cluster.chance_to_rotate(&mut rotate_seed_rng_2, &mut nodes, ACTIVE_SET_SIZE, &stakes, CHANCE_TO_ROTATE, &mut rotate_seed_rng);
+            cluster.chance_to_rotate( &mut nodes, ACTIVE_SET_SIZE, &stakes, CHANCE_TO_ROTATE);
         }
     }
 }

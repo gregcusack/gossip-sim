@@ -22,6 +22,8 @@ use {
         Rng,
         seq::SliceRandom
     },
+    rand::SeedableRng,
+    rayon::prelude::*,
 };
 
 #[cfg_attr(test, cfg(test))]
@@ -668,23 +670,20 @@ impl Cluster {
         trace!("total prunes: {}", self.total_prunes);
     }
 
-    pub fn chance_to_rotate<R: Rng>(
+    pub fn chance_to_rotate(
         &self,
-        rng: &mut R,
         nodes: &mut Vec<Node>,
         active_set_size: usize,
         stakes: &HashMap<Pubkey, u64>,
         probability_of_rotation: f64,
-        seeded_rng: &mut StdRng,
-
     ) {
-        debug!("Rotating Active Sets....");
-        for node in nodes {
-            if seeded_rng.gen::<f64>() < probability_of_rotation {
-                debug!("Rotating Active Set for: {:?}", node.pubkey());
-                node.rotate_active_set(rng, active_set_size, stakes, false);
+        nodes.par_iter_mut().for_each(|node| {
+            let mut chance_rng = StdRng::from_entropy();
+            if chance_rng.gen::<f64>() < probability_of_rotation {
+                trace!("Rotating Active Set for: {:?}", node.pubkey());
+                node.rotate_active_set(&mut chance_rng, active_set_size, stakes, false);
             }
-        }
+        });
     }
 
     pub fn fail_nodes(
