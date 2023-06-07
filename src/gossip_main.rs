@@ -17,19 +17,22 @@ use {
             GossipStats,
             GossipStatsCollection,
         },
-        influx_db::InfluxDB,
+        influx_db::{
+            InfluxDataPoint,
+            InfluxThread,
+        },
     },
     solana_client::rpc_client::RpcClient,
     solana_sdk::pubkey::Pubkey,
     std::{
         fs::{File}, 
         path::Path, 
-        collections::{HashMap, BinaryHeap},
+        collections::{HashMap, BinaryHeap, VecDeque},
         process::exit,
         cmp::Reverse,
         env,
-        rc::Rc,
-        cell::RefCell,
+        sync::{Arc, Mutex},
+        thread,
     },
     rand::rngs::StdRng,
     rand::SeedableRng,
@@ -207,7 +210,15 @@ fn parse_matches() -> ArgMatches {
             Arg::with_name("influx")
                 .long("influx")
                 .takes_value(true)
+                .default_value("l")
                 .help("Influx for reporing metrics. i for internal-metrics, l for localhost"),
+        )
+        .arg(
+            Arg::with_name("print_stats")
+                .long("print-stats")
+                .value_name("PRINT_STATS_TO_CONSOLE")
+                .takes_value(false)
+                .help("Set to print out Gossip Stats to console at end of simulation"),
         )
         .get_matches()
 }
@@ -257,7 +268,8 @@ fn run_simulation(
     config: &Config, 
     matches: &ArgMatches, 
     gossip_stats_collection: &mut GossipStatsCollection, 
-    influx_db: Option<&mut Rc<RefCell<InfluxDB>>>,
+    // influx_db: Option<&mut Rc<RefCell<InfluxDB>>>,
+    datapoint_queue: &Arc<Mutex<VecDeque<InfluxDataPoint>>>,
     simulation_iteration: usize,
 ) {
     info!("##### SIMULATION ITERATION: {} #####", simulation_iteration);
@@ -327,6 +339,21 @@ fn run_simulation(
     let mut stats = GossipStats::default();
     stats.set_simulation_parameters(config);
     stats.set_origin(*origin_pubkey);
+
+    let mut datapoint = InfluxDataPoint::default();
+    datapoint.set_start();
+    datapoint_queue.lock().unwrap().push_back(datapoint);
+
+    let mut datapoint = InfluxDataPoint::default();
+    datapoint.create_config_point(
+        config.gossip_push_fanout,
+        config.gossip_active_set_size,
+        config.origin_rank,
+        config.prune_stake_threshold,
+        config.min_ingress_nodes,
+    );
+    datapoint_queue.lock().unwrap().push_back(datapoint);
+
     info!("Calculating the MSTs for origin: {:?}, stake: {}", origin_pubkey, stakes.get(origin_pubkey).unwrap());
     for gossip_iteration in 0..config.gossip_iterations {
         if gossip_iteration % 10 == 0 {
@@ -376,18 +403,16 @@ fn run_simulation(
 
             stats.insert_coverage(coverage);
             stats.insert_hops_stat(cluster.get_distances());
-            
+
+            let mut datapoint = InfluxDataPoint::default();
+
             match cluster.relative_message_redundancy() {
                 Ok(result) => {
                     stats.insert_rmr(result);
-                    if let Some(ref db) = influx_db {
-                        db.borrow_mut().create_data_point(
-                            result,
-                            "rmr".to_string(), 
-                            steady_state_iteration,
-                            simulation_iteration
-                        );
-                    }
+                    datapoint.create_data_point(
+                        result, 
+                        "rmr".to_string()
+                    );
                 },
                 Err(_) => error!("Network RMR error. # of nodes is 1."),
             }
@@ -403,36 +428,33 @@ fn run_simulation(
 
             stats.calculate_outbound_branching_factor(cluster.get_pushes());
 
-            if let Some(ref db) = influx_db {
-                db.borrow_mut().create_data_point(
-                    coverage,
-                    "coverage".to_string(), 
-                    steady_state_iteration,
-                    simulation_iteration
-                );
+            datapoint.create_data_point(
+                coverage, 
+                "coverage".to_string()
+            );
 
-                db.borrow_mut().create_hops_stat_point(
-                    stats.get_hops_stat_by_iteration(steady_state_iteration),
-                    steady_state_iteration,
-                    simulation_iteration
-                );
+            datapoint.create_hops_stat_point(
+                stats.get_hops_stat_by_iteration(steady_state_iteration)
+            );
 
-                db.borrow_mut().create_stranded_node_stat_point(
-                    stats.get_stranded_node_stats_by_iteration(steady_state_iteration),
-                    steady_state_iteration,
-                    simulation_iteration
-                );
+            datapoint.create_stranded_node_stat_point(
+                stats.get_stranded_node_stats_by_iteration(steady_state_iteration)
+            );
 
-                db.borrow_mut().create_data_point(
-                    stats.get_outbound_branching_factor_by_index(steady_state_iteration),
-                    "branching_factor".to_string(), 
-                    steady_state_iteration,
-                    simulation_iteration
-                );
-                db.borrow().send_data_points();
-            }
+            datapoint.create_data_point(
+                stats.get_outbound_branching_factor_by_index(steady_state_iteration),
+                "branching_factor".to_string()
+            );
+
+            datapoint.create_iteration_point(
+                steady_state_iteration, 
+                simulation_iteration
+            );
+
+            datapoint_queue.lock().unwrap().push_back(datapoint);
         }
     }
+
     if !stats.is_empty() {
         stats.run_all_calculations(config.num_buckets_for_stranded_node_hist);
         gossip_stats_collection.push(stats.clone());
@@ -490,6 +512,7 @@ fn main() {
                     })
                     .unwrap(),
         warm_up_rounds: value_t_or_exit!(matches, "warm_up_rounds", usize),
+        print_stats: matches.is_present("print_stats"),
     };
 
     if config.gossip_iterations <= config.warm_up_rounds {
@@ -498,37 +521,40 @@ fn main() {
             config.warm_up_rounds);
     }
 
-    // check if we are going to push data to influx
-    // if --influx set, we are pushing to influx
-    let mut influx_db: Option<Rc<RefCell<InfluxDB>>> = if let Some(influx_url) = matches.value_of("influx") {
-        if let Err(err) = load_influx_env_vars() {
-            error!("Failed to load environment variables: {}", err);
-            return;
-        }
+    let influx_type = matches.value_of("influx").unwrap_or_default().to_string().clone();
     
-        Some(Rc::new(RefCell::new(InfluxDB::new(
+
+    let datapoint_queue: Arc<Mutex<VecDeque<InfluxDataPoint>>> = Arc::new(Mutex::new(VecDeque::new()));
+    let influx_db_queue = datapoint_queue.clone();
+
+    if let Err(err) = load_influx_env_vars() {
+        error!("Failed to load environment variables: {}", err);
+        return;
+    }
+    let influx_thread = thread::spawn(move || {
+        InfluxThread::start(
             gossip_sim::get_influx_url(
-                influx_url
+                influx_type.as_str()
             ),
             env::var("GOSSIP_SIM_INFLUX_USERNAME")
                 .unwrap_or_else(|_| {
                     error!("GOSSIP_SIM_INFLUX_USERNAME is not set");
                     exit(1);
-                }),
-                env::var("GOSSIP_SIM_INFLUX_PASSWORD")
+            }),
+            env::var("GOSSIP_SIM_INFLUX_PASSWORD")
                 .unwrap_or_else(|_| {
                     error!("GOSSIP_SIM_INFLUX_PASSWORD is not set");
                     exit(1);
-                }),
-                env::var("GOSSIP_SIM_INFLUX_DATABASE")
+            }),
+            env::var("GOSSIP_SIM_INFLUX_DATABASE")
                 .unwrap_or_else(|_| {
                     error!("GOSSIP_SIM_INFLUX_DATABASE is not set");
                     exit(1);
-                })
-        ).unwrap())))
-    } else {
-        None
-    };
+            }),
+            influx_db_queue
+        )
+    });
+
 
     let mut gossip_stats_collection = GossipStatsCollection::default();
     gossip_stats_collection.set_number_of_simulations(config.num_simulations);
@@ -546,7 +572,7 @@ fn main() {
                 config.gossip_active_set_size = active_set_size;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, influx_db.as_mut(), i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, &datapoint_queue, i);
             }
         }
         Testing::PushFanout => {
@@ -561,7 +587,7 @@ fn main() {
                 config.gossip_push_fanout = push_fanout;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, influx_db.as_mut(), i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, &datapoint_queue, i);
             }
 
         }
@@ -577,7 +603,7 @@ fn main() {
                 config.min_ingress_nodes = min_ingress_nodes;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, influx_db.as_mut(), i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, &datapoint_queue, i);
             }
         }
         Testing::MinStakeThreshold => {
@@ -592,7 +618,7 @@ fn main() {
                 config.prune_stake_threshold = prune_stake_threshold;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, influx_db.as_mut(), i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, &datapoint_queue, i);
             }
         }
         Testing::OriginRank => {
@@ -607,21 +633,30 @@ fn main() {
                 config.origin_rank = origin_rank;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, influx_db.as_mut(), i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, &datapoint_queue, i);
             }
         }
         Testing::NoTest => {
             for i in 0..config.num_simulations {
-                run_simulation(&config, &matches, &mut gossip_stats_collection, influx_db.as_mut(), i);
+                run_simulation(&config, &matches, &mut gossip_stats_collection, &datapoint_queue, i);
             }
         }
     }
+    // push last datapoint to signal to thread that we are done running tests
+    let mut datapoint = InfluxDataPoint::default();
+    datapoint.set_last_datapoint();
+    datapoint_queue.lock().unwrap().push_back(datapoint);
 
-    if !gossip_stats_collection.is_empty() {
-        gossip_stats_collection.print_all(config.gossip_iterations, config.warm_up_rounds, config.test_type);
-    } else {
-        warn!("WARNING: Gossip Stats Collection is empty. Is `Iterations` <= `warm-up-rounds`?");
+    // Print Collective Stats
+    if config.print_stats {
+        if !gossip_stats_collection.is_empty() {
+            gossip_stats_collection.print_all(config.gossip_iterations, config.warm_up_rounds, config.test_type);
+        } else {
+            warn!("WARNING: Gossip Stats Collection is empty. Is `Iterations` <= `warm-up-rounds`?");
+        }
     }
+
+    let _ = influx_thread.join();
 }
 
 #[cfg(test)]

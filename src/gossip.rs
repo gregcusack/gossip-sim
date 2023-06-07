@@ -110,6 +110,7 @@ pub struct Config<'a> {
     pub num_simulations: usize,
     pub step_size: StepSize,
     pub warm_up_rounds: usize,
+    pub print_stats: bool,
 }
 
 pub struct Cluster {
