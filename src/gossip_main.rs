@@ -32,7 +32,7 @@ use {
         cmp::Reverse,
         env,
         sync::{Arc, Mutex},
-        thread,
+        thread::JoinHandle,
     },
     rand::rngs::StdRng,
     rand::SeedableRng,
@@ -210,8 +210,8 @@ fn parse_matches() -> ArgMatches {
             Arg::with_name("influx")
                 .long("influx")
                 .takes_value(true)
-                .default_value("l")
-                .help("Influx for reporing metrics. i for internal-metrics, l for localhost"),
+                .default_value("n")
+                .help("Influx for reporing metrics. i for internal-metrics, l for localhost. n for none [default: n]"),
         )
         .arg(
             Arg::with_name("print_stats")
@@ -268,8 +268,7 @@ fn run_simulation(
     config: &Config, 
     matches: &ArgMatches, 
     gossip_stats_collection: &mut GossipStatsCollection, 
-    // influx_db: Option<&mut Rc<RefCell<InfluxDB>>>,
-    datapoint_queue: &Arc<Mutex<VecDeque<InfluxDataPoint>>>,
+    datapoint_queue: &Option<Arc<Mutex<VecDeque<InfluxDataPoint>>>>,
     simulation_iteration: usize,
 ) {
     info!("##### SIMULATION ITERATION: {} #####", simulation_iteration);
@@ -340,23 +339,33 @@ fn run_simulation(
     stats.set_simulation_parameters(config);
     stats.set_origin(*origin_pubkey);
 
-    let mut datapoint = InfluxDataPoint::default();
-    datapoint.set_start();
-    datapoint_queue.lock().unwrap().push_back(datapoint);
+    match datapoint_queue {
+        Some(dp_queue) => {
+            let mut datapoint = InfluxDataPoint::default();
+            datapoint.set_start();
+            dp_queue.lock().unwrap().push_back(datapoint);
+        }
+        _ => { }
+    } 
 
     info!("Calculating the MSTs for origin: {:?}, stake: {}", origin_pubkey, stakes.get(origin_pubkey).unwrap());
     for gossip_iteration in 0..config.gossip_iterations {
         if gossip_iteration % 10 == 0 {
             info!("MST ITERATION: {}", gossip_iteration);
-            let mut datapoint = InfluxDataPoint::default();
-            datapoint.create_config_point(
-                config.gossip_push_fanout,
-                config.gossip_active_set_size,
-                config.origin_rank,
-                config.prune_stake_threshold,
-                config.min_ingress_nodes,
-            );
-            datapoint_queue.lock().unwrap().push_back(datapoint);
+            match datapoint_queue {
+                Some(dp_queue) => {
+                    let mut datapoint = InfluxDataPoint::default();
+                    datapoint.create_config_point(
+                        config.gossip_push_fanout,
+                        config.gossip_active_set_size,
+                        config.origin_rank,
+                        config.prune_stake_threshold,
+                        config.min_ingress_nodes,
+                    );
+                    dp_queue.lock().unwrap().push_back(datapoint);
+                }
+                _ => { }
+            }
         }
             
         if config.fail_nodes && gossip_iteration == config.when_to_fail {
@@ -403,19 +412,6 @@ fn run_simulation(
             stats.insert_coverage(coverage);
             stats.insert_hops_stat(cluster.get_distances());
 
-            let mut datapoint = InfluxDataPoint::default();
-
-            match cluster.relative_message_redundancy() {
-                Ok(result) => {
-                    stats.insert_rmr(result);
-                    datapoint.create_data_point(
-                        result, 
-                        "rmr".to_string()
-                    );
-                },
-                Err(_) => error!("Network RMR error. # of nodes is 1."),
-            }
-
             stats.insert_stranded_nodes(
                 &cluster.stranded_nodes(), 
                 &stakes
@@ -427,29 +423,52 @@ fn run_simulation(
 
             stats.calculate_outbound_branching_factor(cluster.get_pushes());
 
-            datapoint.create_data_point(
-                coverage, 
-                "coverage".to_string()
-            );
-
-            datapoint.create_hops_stat_point(
-                stats.get_hops_stat_by_iteration(steady_state_iteration)
-            );
-
-            datapoint.create_stranded_node_stat_point(
-                stats.get_stranded_node_stats_by_iteration(steady_state_iteration)
-            );
-
-            datapoint.create_data_point(
-                stats.get_outbound_branching_factor_by_index(steady_state_iteration),
-                "branching_factor".to_string()
-            );
-
-            datapoint.create_iteration_point(
-                steady_state_iteration, 
-                simulation_iteration
-            );
-            datapoint_queue.lock().unwrap().push_back(datapoint);
+            match datapoint_queue {
+                Some(dp_queue) => {
+                    let mut datapoint = InfluxDataPoint::default();
+                    match cluster.relative_message_redundancy() {
+                        Ok(result) => {
+                            stats.insert_rmr(result);
+                            datapoint.create_data_point(
+                                result, 
+                                "rmr".to_string()
+                            );
+                        },
+                        Err(_) => error!("Network RMR error. # of nodes is 1."),
+                    }
+                    datapoint.create_data_point(
+                        coverage, 
+                        "coverage".to_string()
+                    );
+        
+                    datapoint.create_hops_stat_point(
+                        stats.get_hops_stat_by_iteration(steady_state_iteration)
+                    );
+        
+                    datapoint.create_stranded_node_stat_point(
+                        stats.get_stranded_node_stats_by_iteration(steady_state_iteration)
+                    );
+        
+                    datapoint.create_data_point(
+                        stats.get_outbound_branching_factor_by_index(steady_state_iteration),
+                        "branching_factor".to_string()
+                    );
+        
+                    datapoint.create_iteration_point(
+                        steady_state_iteration, 
+                        simulation_iteration
+                    );
+                    dp_queue.lock().unwrap().push_back(datapoint);
+                }
+                None => {
+                    match cluster.relative_message_redundancy() {
+                        Ok(result) => {
+                            stats.insert_rmr(result);
+                        },
+                        Err(_) => error!("Network RMR error. # of nodes is 1."),
+                    }
+                }
+            }
         }
     }
 
@@ -519,40 +538,42 @@ fn main() {
             config.warm_up_rounds);
     }
 
+    let mut datapoint_queue: Option<Arc<Mutex<VecDeque<InfluxDataPoint>>>> = None;
+    let mut influx_thread: Option<JoinHandle<()>> = None;
     let influx_type = matches.value_of("influx").unwrap_or_default().to_string().clone();
     
+    if influx_type == "l".to_string() || influx_type == "i".to_string() {
+        datapoint_queue = Some(Arc::new(Mutex::new(VecDeque::new())));
+        let influx_db_queue = datapoint_queue.clone().unwrap();
 
-    let datapoint_queue: Arc<Mutex<VecDeque<InfluxDataPoint>>> = Arc::new(Mutex::new(VecDeque::new()));
-    let influx_db_queue = datapoint_queue.clone();
-
-    if let Err(err) = load_influx_env_vars() {
-        error!("Failed to load environment variables: {}", err);
-        return;
+        if let Err(err) = load_influx_env_vars() {
+            error!("Failed to load environment variables: {}", err);
+            return;
+        }
+        influx_thread = Some(std::thread::spawn(move || {
+            InfluxThread::start(
+                gossip_sim::get_influx_url(
+                    influx_type.as_str()
+                ),
+                env::var("GOSSIP_SIM_INFLUX_USERNAME")
+                    .unwrap_or_else(|_| {
+                        error!("GOSSIP_SIM_INFLUX_USERNAME is not set");
+                        exit(1);
+                }),
+                env::var("GOSSIP_SIM_INFLUX_PASSWORD")
+                    .unwrap_or_else(|_| {
+                        error!("GOSSIP_SIM_INFLUX_PASSWORD is not set");
+                        exit(1);
+                }),
+                env::var("GOSSIP_SIM_INFLUX_DATABASE")
+                    .unwrap_or_else(|_| {
+                        error!("GOSSIP_SIM_INFLUX_DATABASE is not set");
+                        exit(1);
+                }),
+                influx_db_queue
+            )
+        }));
     }
-    let influx_thread = thread::spawn(move || {
-        InfluxThread::start(
-            gossip_sim::get_influx_url(
-                influx_type.as_str()
-            ),
-            env::var("GOSSIP_SIM_INFLUX_USERNAME")
-                .unwrap_or_else(|_| {
-                    error!("GOSSIP_SIM_INFLUX_USERNAME is not set");
-                    exit(1);
-            }),
-            env::var("GOSSIP_SIM_INFLUX_PASSWORD")
-                .unwrap_or_else(|_| {
-                    error!("GOSSIP_SIM_INFLUX_PASSWORD is not set");
-                    exit(1);
-            }),
-            env::var("GOSSIP_SIM_INFLUX_DATABASE")
-                .unwrap_or_else(|_| {
-                    error!("GOSSIP_SIM_INFLUX_DATABASE is not set");
-                    exit(1);
-            }),
-            influx_db_queue
-        )
-    });
-
 
     let mut gossip_stats_collection = GossipStatsCollection::default();
     gossip_stats_collection.set_number_of_simulations(config.num_simulations);
@@ -640,11 +661,24 @@ fn main() {
             }
         }
     }
-    // push last datapoint to signal to thread that we are done running tests
-    let mut datapoint = InfluxDataPoint::default();
-    datapoint.set_last_datapoint();
-    datapoint_queue.lock().unwrap().push_back(datapoint);
 
+    match datapoint_queue {
+        Some(dp_queue) => {
+            // push last datapoint to signal to thread that we are done running tests
+            let mut datapoint = InfluxDataPoint::default();
+            datapoint.set_last_datapoint();
+            dp_queue.lock().unwrap().push_back(datapoint);
+            
+            match influx_thread {
+                Some(t) => {
+                    let _ = t.join();
+                }
+                _ => { }
+            }
+        }
+        _ => { }
+    }
+    
     // Print Collective Stats
     if config.print_stats {
         if !gossip_stats_collection.is_empty() {
@@ -654,7 +688,7 @@ fn main() {
         }
     }
 
-    let _ = influx_thread.join();
+
 }
 
 #[cfg(test)]
@@ -675,7 +709,6 @@ mod tests {
         rand::SeedableRng,
         rand_chacha::ChaChaRng,
         rand::Rng,
-        rand::rngs::StdRng,
     };
 
     pub struct TestNode {
