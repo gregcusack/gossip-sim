@@ -1758,12 +1758,7 @@ mod tests {
                 cluster.prune_connections(&node_map, &stakes);
             }
 
-            let seed = [42u8; 32];
-            let mut rotate_seed_rng = StdRng::from_seed(seed);
-            let mut rotate_seed_rng_2 = StdRng::from_seed(seed);
-            cluster.chance_to_rotate(&mut rotate_seed_rng_2, &mut nodes, ACTIVE_SET_SIZE, &stakes, CHANCE_TO_ROTATE, &mut rotate_seed_rng);
-        
-            
+            cluster.chance_to_rotate( &mut nodes, ACTIVE_SET_SIZE, &stakes, CHANCE_TO_ROTATE);
         }
 
         assert_eq!(gossip_stats.get_rmr_by_index(0), 2.8);
