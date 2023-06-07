@@ -213,6 +213,13 @@ fn parse_matches() -> ArgMatches {
                 .default_value("l")
                 .help("Influx for reporing metrics. i for internal-metrics, l for localhost"),
         )
+        .arg(
+            Arg::with_name("print_stats")
+                .long("print-stats")
+                .value_name("PRINT_STATS_TO_CONSOLE")
+                .takes_value(false)
+                .help("Set to print out Gossip Stats to console at end of simulation"),
+        )
         .get_matches()
 }
 
@@ -447,9 +454,6 @@ fn run_simulation(
             datapoint_queue.lock().unwrap().push_back(datapoint);
         }
     }
-    let mut datapoint = InfluxDataPoint::default();
-    datapoint.set_last_datapoint();
-    datapoint_queue.lock().unwrap().push_back(datapoint);
 
     if !stats.is_empty() {
         stats.run_all_calculations(config.num_buckets_for_stranded_node_hist);
@@ -508,6 +512,7 @@ fn main() {
                     })
                     .unwrap(),
         warm_up_rounds: value_t_or_exit!(matches, "warm_up_rounds", usize),
+        print_stats: matches.is_present("print_stats"),
     };
 
     if config.gossip_iterations <= config.warm_up_rounds {
@@ -637,12 +642,19 @@ fn main() {
             }
         }
     }
+    // push last datapoint to signal to thread that we are done running tests
+    let mut datapoint = InfluxDataPoint::default();
+    datapoint.set_last_datapoint();
+    datapoint_queue.lock().unwrap().push_back(datapoint);
 
-    // if !gossip_stats_collection.is_empty() {
-    //     gossip_stats_collection.print_all(config.gossip_iterations, config.warm_up_rounds, config.test_type);
-    // } else {
-    //     warn!("WARNING: Gossip Stats Collection is empty. Is `Iterations` <= `warm-up-rounds`?");
-    // }
+    // Print Collective Stats
+    if config.print_stats {
+        if !gossip_stats_collection.is_empty() {
+            gossip_stats_collection.print_all(config.gossip_iterations, config.warm_up_rounds, config.test_type);
+        } else {
+            warn!("WARNING: Gossip Stats Collection is empty. Is `Iterations` <= `warm-up-rounds`?");
+        }
+    }
 
     let _ = influx_thread.join();
 }

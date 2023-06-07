@@ -168,16 +168,12 @@ impl InfluxThread {
 
         loop {
             let datapoint = datapoint_queue.lock().unwrap().pop_front();
-            // info!("wait time: {}", wait_time.as_millis());
             if let Some(dp) = datapoint {
-                // info!("front val: {}", dp.data());
                 if dp.last_datapoint() {
                     rx_last_datapoint = true;
                 } else if dp.is_start(){
-                    // info!("start received!");
                     wait_time = std::time::Duration::from_millis(1);
                 } else {
-                    // info!("not last datapoint");
                     influx_db.send_data_points(dp);
     
                     unsafe {
@@ -193,10 +189,9 @@ impl InfluxThread {
                     info!("Last simulation datapoint recorded. Draining Queue...")
                 }
                 unsafe {
-                    // info!("Waiting to drain queue...");
                     if let Some(ref t) = TRACKER {
                         if t.lock().unwrap().equal() {
-                            // info!("Queue Drained. Exiting...");
+                            info!("Queue Drained. Exiting...");
                             break;
                         }
                     } 
