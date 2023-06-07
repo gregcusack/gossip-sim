@@ -1,5 +1,3 @@
-use std::default;
-
 use {
     url::Url,
     reqwest,
@@ -20,6 +18,15 @@ use {
 
 static mut TRACKER: Option<Arc<Mutex<Tracker>>> = None;
 
+pub fn get_timestamp_now() -> String {
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+
+    format!("{}\n", ts)
+}
+
 pub struct ReportToInflux {}
 
 impl ReportToInflux {
@@ -33,6 +40,7 @@ impl ReportToInflux {
     ) {
         let client = reqwest::Client::new();
         let influx_url = url.join("write").unwrap();
+
 
         debug!("about to send: data_point: {}", data_point);
         debug!("url: {:?}", url);
@@ -153,16 +161,21 @@ impl InfluxThread {
             TRACKER = Some(Arc::new(Mutex::new(Tracker::default())));
         }
 
+        let mut wait_time = std::time::Duration::from_millis(100);
+
         let mut rx_last_datapoint = false;
         let mut draining_queue_log_message_flag = false;
 
         loop {
             let datapoint = datapoint_queue.lock().unwrap().pop_front();
-            
+            // info!("wait time: {}", wait_time.as_millis());
             if let Some(dp) = datapoint {
                 // info!("front val: {}", dp.data());
                 if dp.last_datapoint() {
                     rx_last_datapoint = true;
+                } else if dp.is_start(){
+                    // info!("start received!");
+                    wait_time = std::time::Duration::from_millis(1);
                 } else {
                     // info!("not last datapoint");
                     influx_db.send_data_points(dp);
@@ -189,7 +202,7 @@ impl InfluxThread {
                     } 
                 }
             }
-            thread::sleep(std::time::Duration::from_millis(10));
+            thread::sleep(wait_time);
         }
     }
 }
@@ -241,12 +254,14 @@ impl InfluxDB {
 #[derive(Clone, Debug)]
 pub struct InfluxDataPoint {
     datapoint: String,
+    timestamp: String,
 }
 
 impl Default for InfluxDataPoint {
     fn default() -> Self {
         InfluxDataPoint {
             datapoint: "".to_string(),
+            timestamp: get_timestamp_now(),
         }
     }
 }
@@ -297,12 +312,13 @@ impl InfluxDataPoint {
             .as_nanos();
 
         format!("{}\n", ts)
+        // format!("{}", ts)
     }
 
     pub fn append_timestamp(
         &mut self,
     ) {
-        self.datapoint.push_str(self.get_timestamp_now().as_str());
+        self.datapoint.push_str(self.timestamp.as_str());
     }
 
     pub fn create_data_point(
@@ -315,6 +331,7 @@ impl InfluxDataPoint {
             data
         );        
         self.datapoint.push_str(data_point.as_str());
+        self.append_timestamp();
     }
 
     pub fn create_hops_stat_point(
@@ -322,7 +339,7 @@ impl InfluxDataPoint {
         data: &HopsStat,
     ) {
 
-        let data_point = format!("{} mean={},median={},max={}\n",
+        let data_point = format!("{} mean={},median={},max={} ",
             "hops_stat".to_string(), 
             data.mean(),
             data.median(),
@@ -330,13 +347,14 @@ impl InfluxDataPoint {
         );
 
         self.datapoint.push_str(data_point.as_str());
+        self.append_timestamp();
     }
 
     pub fn create_stranded_node_stat_point(
         &mut self,
         data: &StrandedNodeStats,
     ) {
-        let data_point = format!("{} count={},mean={},median={},max={},min={}\n",
+        let data_point = format!("{} count={},mean={},median={},max={},min={} ",
             "stranded_node_stats".to_string(),
             data.count(),
             data.mean(),
@@ -346,6 +364,7 @@ impl InfluxDataPoint {
         );
 
         self.datapoint.push_str(data_point.as_str());
+        self.append_timestamp();
     }
 
     pub fn create_iteration_point(
@@ -358,6 +377,7 @@ impl InfluxDataPoint {
             gossip_iter
         );
         self.datapoint.push_str(data_point.as_str());
+        self.append_timestamp();
     }
 
     pub fn create_config_point(
@@ -368,7 +388,7 @@ impl InfluxDataPoint {
         prune_stake_threshold: f64,
         min_ingress_nodes: usize,
     ) {
-        let data_point = format!("config push_fanout={},active_set_size={},origin_rank={},prune_stake_threshold={},min_ingress_nodes={}\n",
+        let data_point = format!("config push_fanout={},active_set_size={},origin_rank={},prune_stake_threshold={},min_ingress_nodes={} ",
             push_fanout, 
             active_set_size,
             origin_rank,
@@ -377,5 +397,6 @@ impl InfluxDataPoint {
         );
 
         self.datapoint.push_str(data_point.as_str());
+        self.append_timestamp();
     }
 }
