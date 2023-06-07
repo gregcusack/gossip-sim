@@ -74,8 +74,10 @@ cargo run --bin gossip-sim --
     --filter-zero-staked-nodes
     --num-buckets <num-buckets-for-histogram>
     --warm-up-rounds <warm_up_rounds>
+    --print-stats
 ```
-Note: `warm-up-rounds` sets the number of gossip iterations to run before collecting gossip statistics [default: 200]. It allows gossip to reach a sort of steady state. Without this, Gossip Statistics will include transient stats measued during the initial creation of the MST.
+- Note: `warm-up-rounds` sets the number of gossip iterations to run before collecting gossip statistics [default: 200]. It allows gossip to reach a sort of steady state. Without this, Gossip Statistics will include transient stats measued during the initial creation of the MST.
+- Note: `print-stats` is a flag that will print out all of the gossip stats in the simulation to console
 
 #### Option 3: Pull accounts from mainnet and run simulation
 - This will pull all node accounts from mainnet and simulate the network.
