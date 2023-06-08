@@ -869,7 +869,7 @@ mod tests {
                 cluster.prune_connections(&node_map, &stakes);
             }
 
-            cluster.chance_to_rotate( &mut nodes, ACTIVE_SET_SIZE, &stakes, CHANCE_TO_ROTATE);
+            cluster.chance_to_rotate(&mut nodes, ACTIVE_SET_SIZE, &stakes, CHANCE_TO_ROTATE);
         }
     }
 }
