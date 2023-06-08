@@ -540,12 +540,13 @@ impl Cluster {
 
                         // increment the new node (neighbor) to the rmr node count
                         self.rmr.increment_n();
-                    } else {
-                        // so above, we increment_m because that is indicating we are sending a new message to a neighbor
-                        // but once we send it and it results in a prune, we have to count the responding prune message
-                        // so this additional increment_m() is for the return "prune" value
-                        self.rmr.increment_m();
                     }
+                    // else {
+                    //     // so above, we increment_m because that is indicating we are sending a new message to a neighbor
+                    //     // but once we send it and it results in a prune, we have to count the responding prune message
+                    //     // so this additional increment_m() is for the return "prune" value
+                    //     self.rmr.increment_m();
+                    // }
                     // Here we track, for specific neighbor, we know that the current node
                     // has sent a message to the neighbor. So we must note that
                     // our neighbor has received a message from the current node
@@ -628,6 +629,11 @@ impl Cluster {
                 )
                 .zip(repeat(origin))
                 .into_group_map();
+
+            // add in prunes to total messages sent for rmr
+            for (_, prunees) in prunes.iter() {
+                self.rmr.increment_m_by(prunees.len());
+            }
 
             //for the current node, add in it's prunes
             // prunes (above) are peer => Vec<origins>
