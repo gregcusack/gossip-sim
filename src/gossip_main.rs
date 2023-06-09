@@ -158,6 +158,7 @@ fn parse_matches() -> ArgMatches {
                     min-ingress-nodes
                     min-stake-threshold
                     origin-rank
+                    fail-nodes
                     [default: no-test]
                 "),
         )
@@ -177,18 +178,11 @@ fn parse_matches() -> ArgMatches {
                 .help("Size of step for test_type. [default: 1]"),
         )
         .arg(
-            Arg::with_name("fail_nodes")
-                .long("fail-nodes")
-                .takes_value(false)
-                .requires("when_to_fail")
-                .help("Fail a certain percentage of nodes"),
-        )
-        .arg(
             Arg::with_name("fraction_to_fail")
                 .long("fraction-to-fail")
                 .takes_value(true)
                 .default_value("0.1")
-                .requires("fail_nodes")
+                .requires("test_type")
                 .help("Fail `fraction-to-fail` of total nodes in cluster"),
         )
         .arg(
@@ -196,7 +190,7 @@ fn parse_matches() -> ArgMatches {
                 .long("when-to-fail")
                 .takes_value(true)
                 .default_value("0")
-                .requires("fail_nodes")
+                .requires("test_type")
                 .help("On what iteration should the nodes fail"),
         )
         .arg(
@@ -272,6 +266,7 @@ fn run_simulation(
     simulation_iteration: usize,
 ) {
     info!("##### SIMULATION ITERATION: {} #####", simulation_iteration);
+    let node_account_location: &str;
     // check if we want to read in pubkeys/stakes from a file
     let nodes = if config.accounts_from_file {
         // READ ACCOUNTS FROM FILE
@@ -283,6 +278,7 @@ fn run_simulation(
         let file = File::open(path).unwrap();
 
         info!("Reading {}", config.account_file);
+        node_account_location = config.account_file;
         let accounts: HashMap<String, u64> = serde_yaml::from_reader(file).unwrap();
         info!("{} accounts read in", accounts.len());
         let nodes = make_gossip_cluster_from_map(&accounts, config.filter_zero_staked_nodes);
@@ -292,6 +288,7 @@ fn run_simulation(
         let json_rpc_url =
             gossip_sim::get_json_rpc_url(matches.value_of("json_rpc_url").unwrap_or_default());
         info!("json_rpc_url: {}", json_rpc_url);
+        node_account_location = json_rpc_url;
         let rpc_client = RpcClient::new(json_rpc_url);
         let nodes = make_gossip_cluster_from_rpc(&rpc_client, config.filter_zero_staked_nodes);
         nodes
@@ -321,6 +318,26 @@ fn run_simulation(
         .iter()
         .map(|node| (node.pubkey(), node.stake()))
         .collect();
+
+    if simulation_iteration == 0 {
+        match datapoint_queue {
+            Some(ref dp_queue) => {
+                let mut datapoint = InfluxDataPoint::default();
+                datapoint.create_test_type_point(
+                    config.num_simulations,
+                    config.gossip_iterations,
+                    config.warm_up_rounds,
+                    config.step_size,
+                    nodes.len(),
+                    config.probability_of_rotation,
+                    node_account_location,
+                    config.test_type,
+                );
+                dp_queue.lock().unwrap().push_back(datapoint);
+            }
+            _ => { }
+        }
+    }
     
     //collect vector of nodes
     info!("Simulating Gossip and setting active sets. Please wait.....");
@@ -361,6 +378,7 @@ fn run_simulation(
                         config.origin_rank,
                         config.prune_stake_threshold,
                         config.min_ingress_nodes,
+                        config.fraction_to_fail,
                     );
                     dp_queue.lock().unwrap().push_back(datapoint);
                 }
@@ -368,7 +386,7 @@ fn run_simulation(
             }
         }
             
-        if config.fail_nodes && gossip_iteration == config.when_to_fail {
+        if config.test_type == Testing::FailNodes && gossip_iteration == config.when_to_fail {
             cluster.fail_nodes(config.fraction_to_fail, &mut nodes);
             stats.set_failed_nodes(cluster.get_failed_nodes());
         }
@@ -478,7 +496,7 @@ fn run_simulation(
             0, 
             config.num_buckets_for_stranded_node_hist,
         );
-        stats.build_aggregate_hops_stats_histogram(30, 0, 15);
+        stats.build_aggregate_hops_stats_histogram(50, 0, 25);
 
         stats.run_all_calculations();
         gossip_stats_collection.push(stats.clone());
@@ -532,7 +550,6 @@ fn main() {
         probability_of_rotation: value_t_or_exit!(matches, "active_set_rotation_probability", f64),
         prune_stake_threshold: value_t_or_exit!(matches, "prune_stake_threshold", f64), 
         min_ingress_nodes: value_t_or_exit!(matches, "min_ingress_nodes", usize),
-        fail_nodes: matches.is_present("fail_nodes"),
         fraction_to_fail: value_t_or_exit!(matches, "fraction_to_fail", f64), 
         when_to_fail: value_t_or_exit!(matches, "when_to_fail", usize),
         filter_zero_staked_nodes: matches.is_present("remove_zero_staked_nodes"),
@@ -687,6 +704,21 @@ fn main() {
                 // Update the active_set_size in the config for each experiment
                 let mut config = config.clone();
                 config.origin_rank = origin_rank;
+        
+                // Run the experiment with the updated config
+                run_simulation(&config, &matches, &mut gossip_stats_collection, &datapoint_queue, i);
+            }
+        }
+        Testing::FailNodes => {
+            let step_size: f64 = config.step_size.into();
+            let initial_fraction_to_fail = config.fraction_to_fail;
+
+            for i in 0..config.num_simulations {
+                let fraction_to_fail = initial_fraction_to_fail + (i as f64 * step_size);
+
+                // Update the active_set_size in the config for each experiment
+                let mut config = config.clone();
+                config.fraction_to_fail = fraction_to_fail;
         
                 // Run the experiment with the updated config
                 run_simulation(&config, &matches, &mut gossip_stats_collection, &datapoint_queue, i);

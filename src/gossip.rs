@@ -36,6 +36,7 @@ pub enum Testing {
     MinIngressNodes,
     MinStakeThreshold,
     OriginRank,
+    FailNodes,
     NoTest,
 }
 
@@ -43,11 +44,12 @@ impl std::fmt::Display for Testing {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Testing::ActiveSetSize => write!(f, "ActiveSetSize"),
-            Testing::PushFanout => write!(f, "PushFanout()"),
-            Testing::MinIngressNodes => write!(f, "MinIngressNodes()"),
-            Testing::MinStakeThreshold => write!(f, "MinStakeThreshold()"),
-            Testing::OriginRank => write!(f, "OriginRank()"),
-            Testing::NoTest => write!(f, "NoTest()"),
+            Testing::PushFanout => write!(f, "PushFanout"),
+            Testing::MinIngressNodes => write!(f, "MinIngressNodes"),
+            Testing::MinStakeThreshold => write!(f, "MinStakeThreshold"),
+            Testing::OriginRank => write!(f, "OriginRank"),
+            Testing::FailNodes => write!(f, "FailNodes"),
+            Testing::NoTest => write!(f, "NoTest"),
         }
     }
 }
@@ -62,6 +64,7 @@ impl FromStr for Testing {
             "min-ingress-nodes" => Ok(Testing::MinIngressNodes),
             "min-stake-threshold" => Ok(Testing::MinStakeThreshold),
             "origin-rank" => Ok(Testing::OriginRank),
+            "fail-nodes" => Ok(Testing::FailNodes),
             "no-test" => Ok(Testing::NoTest),
             _ => Err(format!("Invalid test type: {}", s)),
         }
@@ -92,6 +95,15 @@ impl From<StepSize> for f64 {
     }
 }
 
+impl std::fmt::Display for StepSize {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            StepSize::Integer(num) => write!(f, "{}", num),
+            StepSize::Float(num) => write!(f, "{}", num),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Config<'a> {
     pub gossip_push_fanout: usize,
@@ -105,7 +117,6 @@ pub struct Config<'a> {
     pub min_ingress_nodes: usize,
     pub filter_zero_staked_nodes: bool,
     pub num_buckets_for_stranded_node_hist: u64,
-    pub fail_nodes: bool,
     pub fraction_to_fail: f64,
     pub when_to_fail: usize,
     pub test_type: Testing,
