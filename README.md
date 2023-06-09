@@ -70,12 +70,14 @@ cargo run --bin gossip-sim --
     --origin-rank <origin_stake_rank> 
     --rotation-probability <probability-of-active-set-rotation> 
     --min-ingress-nodes <min-ingress-nodes> 
-    --stake-threshold <min-stake-threshold>
+    --prune-stake-threshold <prune-stake-threshold>
     --filter-zero-staked-nodes
     --num-buckets <num-buckets-for-histogram>
     --warm-up-rounds <warm_up_rounds>
+    --print-stats
 ```
-Note: `warm-up-rounds` sets the number of gossip iterations to run before collecting gossip statistics [default: 200]. It allows gossip to reach a sort of steady state. Without this, Gossip Statistics will include transient stats measued during the initial creation of the MST.
+- Note: `warm-up-rounds` sets the number of gossip iterations to run before collecting gossip statistics [default: 200]. It allows gossip to reach a sort of steady state. Without this, Gossip Statistics will include transient stats measued during the initial creation of the MST.
+- Note: `print-stats` is a flag that will print out all of the gossip stats in the simulation to console
 
 #### Option 3: Pull accounts from mainnet and run simulation
 - This will pull all node accounts from mainnet and simulate the network.
@@ -87,7 +89,7 @@ cargo run --bin gossip-sim --
     --origin-rank <origin_stake_rank> 
     --rotation-probability <probability-of-active-set-rotation> 
     --min-ingress-nodes <min-ingress-nodes> 
-    --stake-threshold <min-stake-threshold>
+    --prune-stake-threshold <prune-stake-threshold>
     --filter-zero-staked-nodes
     --num-buckets <num-buckets-for-histogram>
     --warm-up-rounds <warm_up_rounds>
@@ -103,7 +105,7 @@ cargo run --bin gossip-sim --
     --origin-rank <origin_stake_rank> 
     --rotation-probability <probability-of-active-set-rotation> 
     --min-ingress-nodes <min-ingress-nodes> 
-    --stake-threshold <min-stake-threshold>
+    --prune-stake-threshold <prune-stake-threshold>
     --filter-zero-staked-nodes
     --num-buckets <num-buckets-for-histogram>
     --test-type <test-type>
@@ -116,8 +118,9 @@ cargo run --bin gossip-sim --
 active-set-size
 push-fanout
 min-ingress-nodes
-min-stake-threshold
+prune-stake-threshold
 origin-rank
+fail-nodes
 [default: no-test]
 ```
 So if `test-type` is set to `active-set-size`, the first simulation will run gossip with an `active-set-size` of `--active-set-size <active_set_size>` passed in. 
@@ -135,15 +138,43 @@ cargo run --bin gossip-sim --
     --origin-rank <origin_stake_rank> 
     --rotation-probability <probability-of-active-set-rotation> 
     --min-ingress-nodes <min-ingress-nodes> 
-    --stake-threshold <min-stake-threshold>
+    --prune-stake-threshold <prune-stake-threshold>
     --filter-zero-staked-nodes
     --num-buckets <num-buckets-for-histogram>
-    --fail-nodes
     --when-to-fail <gossip-iteration-to-fail-nodes-on>
     --fraction-to-fail <fraction-of-nodes-to-fail (0 < f < 1)>
     --warm-up-rounds <warm_up_rounds>
 ```
-`fraction-to-fail` * total-nodes will fail right before the `when-to-fail`-th gossip iteration is run
+`fraction-to-fail` * total-nodes will fail right before the `when-to-fail`-th gossip iteration is run. This also runs as Option 5 above. Start at `fraction-to-fail` and increase fraction by `step-size` on each iteration.
+
+#### Option 6: Push results to influx
+- This will pull all node accounts from mainnet and simulate the network and push all results to an influxDB instance
+```
+cargo run --bin gossip-sim --
+    --push-fanout <push_fanout> 
+    --active-set-size <active_set_size> 
+    --iterations <number_of_gossip_iterations> 
+    --origin-rank <origin_stake_rank> 
+    --rotation-probability <probability-of-active-set-rotation> 
+    --min-ingress-nodes <min-ingress-nodes> 
+    --prune-stake-threshold <prune-stake-threshold>
+    --filter-zero-staked-nodes
+    --num-buckets <num-buckets-for-histogram>
+    --when-to-fail <gossip-iteration-to-fail-nodes-on>
+    --fraction-to-fail <fraction-of-nodes-to-fail (0 < f < 1)>
+    --warm-up-rounds <warm_up_rounds>
+    --influx <localhost-or-internal-metrics.solana.com, l or i>
+```
+`influx` lets you push metrics to either a localhost or remote influx db instance
+- options are: `i` to push to internal-metrics.solana.com or `l` to push to a localhost influx instance.
+- you are welcome to leave out `--influx`. This will just let you run a standard experiment without influx integration
+- If you do set `--influx i`, you must set the following environment variables in a `.env` file in your root director
+    - GOSSIP_SIM_INFLUX_USERNAME=<influx-username>
+    - GOSSIP_SIM_INFLUX_PASSWORD=<influx-password>
+    - GOSSIP_SIM_INFLUX_DATABASE=<influx-database-name>
+- If you do set `--influx l`, you will still need the `.env` file to get the database name of your localhost instance.
+- We push `rmr`, `coverage`, `hops_stat`, `branching_factor`, and `stranded_node_stats` to influx. NOTE: each of thesea are held in their own series.
+- If you want to query `coverage` series for example. Run: `select * from coverage` from the `influx>` command line
 
 ## Interpreting the output
 Prints out coverage, RMR, Aggregate Hop info, LDH, stranded nodes

@@ -8,8 +8,12 @@ use {
 pub const API_MAINNET_BETA: &str = "https://api.mainnet-beta.solana.com";
 pub const API_TESTNET: &str = "https://api.testnet.solana.com";
 
+pub const INFLUX_INTERNAL_METRICS: &str = "https://internal-metrics.solana.com:8086";
+pub const INFLUX_LOCALHOST: &str = "http://localhost:8086";
+
 pub mod gossip_stats;
 pub mod gossip;
+pub mod influx_db;
 mod push_active_set;
 mod received_cache;
 
@@ -79,6 +83,14 @@ pub fn get_json_rpc_url(json_rpc_url: &str) -> &str {
     match json_rpc_url {
         "m" | "mainnet-beta" => API_MAINNET_BETA,
         "t" | "testnet" => API_TESTNET,
+        _ => json_rpc_url,
+    }
+}
+
+pub fn get_influx_url(json_rpc_url: &str) -> &str {
+    match json_rpc_url {
+        "i" | "internal-metrics" => INFLUX_INTERNAL_METRICS,
+        "l" | "localhost" => INFLUX_LOCALHOST,
         _ => json_rpc_url,
     }
 }

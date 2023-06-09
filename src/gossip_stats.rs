@@ -1,9 +1,26 @@
 use {
-    crate::{Stats, HopsStats},
-    log::{info, error, warn, debug},
-    std::collections::{HashMap, BTreeMap, HashSet},
+    crate::{
+        Stats, 
+        HopsStats
+    },
+    log::{
+        info, 
+        error, 
+        warn, 
+        debug, 
+        trace
+    },
+    std::collections::{
+        HashMap, 
+        BTreeMap, 
+        HashSet
+    },
     solana_sdk::pubkey::Pubkey,
-    crate::gossip::{Testing, StepSize, Config},
+    crate::gossip::{
+        Testing, 
+        StepSize, 
+        Config
+    },
 };
 
 // stores stats about a single run of mst. 
@@ -155,7 +172,7 @@ impl HopsStatCollection {
     }
 
     pub fn get_stat_by_iteration(
-        &mut self,
+        &self,
         index: usize,
     ) -> &HopsStat {
         &self.per_round_stats[index]
@@ -192,9 +209,11 @@ impl HopsStatCollection {
     //TODO: turn this into its own object that is held by the stranded stats collection
     pub fn build_histogram(
         &mut self,
+        upper_bound: u64,
+        lower_bound: u64,
         num_buckets: u64,
     ) {
-        self.histogram.build(num_buckets, &self.raw_hop_collection);
+        self.histogram.build(upper_bound, lower_bound, num_buckets, &self.raw_hop_collection);
     }
 
     pub fn get_histogram(
@@ -246,24 +265,24 @@ impl StatCollection {
         &mut self,
     ) {
         // clone to maintain iteration order for print_stats
-        let mut sorted_coverages = self.collection.clone();
-        sorted_coverages
+        let mut sorted_data_points = self.collection.clone();
+        sorted_data_points
             .sort_by(|a, b| a
                     .partial_cmp(b)
                     .unwrap());
-        let len = sorted_coverages.len();
-        let mean = sorted_coverages
+        let len = sorted_data_points.len();
+        let mean = sorted_data_points
             .iter()
             .sum::<f64>() / len as f64;
         let median = if len % 2 == 0 {
-            (sorted_coverages[len / 2 - 1] + sorted_coverages[len / 2]) / 2.0
+            (sorted_data_points[len / 2 - 1] + sorted_data_points[len / 2]) / 2.0
         } else {
-            sorted_coverages[len / 2]
+            sorted_data_points[len / 2]
         };
-        let max = *sorted_coverages
+        let max = *sorted_data_points
             .last()
             .unwrap_or(&0.0);
-        let min = *sorted_coverages
+        let min = *sorted_data_points
             .first()
             .unwrap_or(&0.0);
 
@@ -352,6 +371,13 @@ impl RelativeMessageRedundancy {
         self.m += 1;
     }
 
+    pub fn increment_m_by(
+        &mut self,
+        amount: usize
+    ) {
+        self.m += amount as u64;
+    }
+
     pub fn increment_n(
         &mut self,
     ) {
@@ -373,6 +399,7 @@ impl RelativeMessageRedundancy {
             Err("Division by zero. n is 0.".to_string())
         } else {
             self.rmr = self.m as f64 / (self.n - 1) as f64 - 1.0;
+            trace!("RMR: {}, m: {}, n: {}", self.rmr, self.m, self.n);
             Ok(self.rmr)
         }
     }
@@ -417,49 +444,44 @@ impl Default for Histogram {
 }
 
 impl Histogram {
-    //TODO: turn this into its own object that is held by the stranded stats collection
     pub fn build(
         &mut self,
+        upper_bound: u64,
+        lower_bound: u64,
         num_buckets: u64,
         input_entries: &Vec<u64>,
-    ) {        
-        self.set_num_buckets(num_buckets);
-        // Determine the range of each bucket
-        self.set_min_entry(
-            input_entries
-                    .iter()
-                    .map(|entry| *entry)
-                    .min()
-                    .unwrap_or(0));
+    ) {
+        self.min_entry = lower_bound;
+        self.max_entry = upper_bound;
+        self.num_buckets = num_buckets;
 
-        self.set_max_entry(
-            input_entries
-                    .iter()
-                    .map(|entry| *entry)
-                    .max()
-                    .unwrap_or(0));
-
-
-        if self.max_entry == self.min_entry {
-            warn!("WARNING: Max and Min histogram entries are the same.");
-            self.set_bucket_range(1);
+        if upper_bound == lower_bound || lower_bound + 1 == upper_bound {
+            warn!("WARNING: Max and Min histogram entries are the same or off by 1.");
+            self.bucket_range = 1;
         } else {
-            self.set_bucket_range(
-                (self.max_entry - self.min_entry + self.num_buckets - 1) / self.num_buckets);    
+            self.bucket_range = (upper_bound - lower_bound) / num_buckets;
         }
 
+        debug!("histogram_v2: upper, lower, buckets, range: {}, {}, {}, {}", upper_bound, lower_bound, num_buckets, self.bucket_range);
+
         // Initialize all buckets with 0 entries
+        self.entries.clear();
         for bucket in 0..self.num_buckets {
             self.entries.insert(bucket, 0);
         }
- 
-        // Iterate over the stranded_nodes entries
-        for hops in input_entries.iter() {
-            // Determine the bucket index based on the times_stranded value
-            let bucket = (*hops - self.min_entry) / self.bucket_range;
-            
-            // Increment the count for the bucket in the histogram
-            *self.entries.entry(bucket).or_insert(0) += 1;
+
+        // Iterate over the input_entries
+        for entry in input_entries.iter() {
+            // Check if the entry is within the defined bounds
+            if *entry >= self.min_entry && *entry <= self.max_entry {
+                // Determine the bucket index based on the entry value
+                let bucket = (entry - self.min_entry) / self.bucket_range;
+
+                // Increment the count for the bucket in the histogram
+                *self.entries.entry(bucket).or_insert(0) += 1;
+            } else {
+                error!("ERROR. Histogram: Entry > max_entry or < min_entry. entry: {}, max_entry: {}, min_entry: {}", entry, self.max_entry, self.min_entry);
+            }
         }
     }
 
@@ -515,11 +537,117 @@ impl Histogram {
         self.num_buckets
     }
 
+    pub fn entries(
+        &self,
+    ) -> &BTreeMap<u64, u64> {
+        &self.entries
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct StrandedNodeStats {
+    stranded_node_count: usize,
+    mean_stake: f64,
+    median_stake: f64,
+    max_stake: u64,
+    min_stake: u64,
+}
+
+impl Default for StrandedNodeStats {
+    fn default() -> Self {
+        Self {
+            stranded_node_count: 0,
+            mean_stake: 0.0,
+            median_stake: 0.0,
+            max_stake: 0,
+            min_stake: 0,
+        }
+    }
+} 
+
+impl StrandedNodeStats {
+    pub fn new(
+        stranded_nodes_vec: &Vec<Pubkey>,
+        stakes: &HashMap<Pubkey, u64>,
+    ) -> Self {
+        if stranded_nodes_vec.len() == 0 {
+            return Self::default()
+        }
+        
+        let mut stranded_stakes: Vec<u64> = Vec::default();
+        for pubkey in stranded_nodes_vec.iter() {
+            stranded_stakes.push(
+                *stakes.get(pubkey).unwrap()
+            )
+        }
+
+        if stranded_nodes_vec.len() == 1 {
+            return Self {
+                stranded_node_count: stranded_stakes.len(),
+                mean_stake: stranded_stakes[0] as f64,
+                median_stake: stranded_stakes[0] as f64,
+                max_stake: stranded_stakes[0],
+                min_stake: stranded_stakes[0],
+            }
+        }
+
+        stranded_stakes
+            .sort_by(|a, b| a
+                    .partial_cmp(b)
+                    .unwrap());
+        let len = stranded_stakes.len();
+        let mean_stake = stranded_stakes
+            .iter()
+            .sum::<u64>() as f64 / len as f64;
+        let median_stake = if len % 2 == 0 {
+            (stranded_stakes[len / 2 - 1] + stranded_stakes[len / 2]) as f64 / 2.0
+        } else {
+            stranded_stakes[len / 2] as f64
+        };
+        let max_stake = *stranded_stakes
+            .last()
+            .unwrap_or(&0);
+        let min_stake = *stranded_stakes
+            .first()
+            .unwrap_or(&0);
+
+        Self {
+            stranded_node_count: stranded_stakes.len(),
+            mean_stake: mean_stake,
+            median_stake: median_stake,
+            max_stake: max_stake,
+            min_stake: min_stake,
+        }
+    }
+
+    pub fn mean(&self) -> f64 {
+        self.mean_stake
+    }
+
+    pub fn max(&self) -> u64 {
+        self.max_stake
+    }
+
+    pub fn min(&self) -> u64 {
+        self.min_stake
+    }
+
+    pub fn median(&self) -> f64 {
+        self.median_stake
+    }
+
+    pub fn count(
+        &self,
+    ) -> usize {
+        self.stranded_node_count
+    }
 
 }
 
+
 #[derive(Debug)]
 pub struct StrandedNodeCollection {
+    per_iter_stranded_node_stats: Vec<StrandedNodeStats>,
     stranded_nodes: HashMap<Pubkey, (/* stake */u64, /* times stranded */ u64)>, 
     /*
     TODO: histogram -> # of nodes stranded for n iterations
@@ -564,6 +692,7 @@ pub struct StrandedNodeCollection {
 impl Default for StrandedNodeCollection {
     fn default() -> Self {
         Self {
+            per_iter_stranded_node_stats: Vec::default(),
             stranded_nodes: HashMap::default(),
             total_gossip_iterations: 0,
             total_stranded_iterations: 0,
@@ -580,7 +709,7 @@ impl Default for StrandedNodeCollection {
             weighted_total_stranded_stake: 0,
             weighted_stranded_node_mean_stake: 0.0,
             weighted_stranded_node_median_stake: 0.0, 
-            histogram: Histogram::default(),    
+            histogram: Histogram::default(), 
         }
     }
 }
@@ -588,6 +717,7 @@ impl Default for StrandedNodeCollection {
 impl Clone for StrandedNodeCollection {
     fn clone(&self) -> Self {
         StrandedNodeCollection {
+            per_iter_stranded_node_stats: self.per_iter_stranded_node_stats.clone(),
             stranded_nodes: self.stranded_nodes.clone(),
             total_gossip_iterations: self.total_gossip_iterations,
             total_stranded_iterations: self.total_stranded_iterations,
@@ -714,6 +844,13 @@ impl StrandedNodeCollection {
         stranded_nodes: &Vec<Pubkey>,
         stakes: &HashMap<Pubkey, u64>,
     ) {
+        self.per_iter_stranded_node_stats.push(
+            StrandedNodeStats::new(
+                stranded_nodes,
+                stakes
+            )
+        );
+
         for pubkey in stranded_nodes.iter() {
             self.increment_stranded_count(pubkey, stakes);
         }
@@ -800,10 +937,14 @@ impl StrandedNodeCollection {
     //TODO: turn this into its own object that is held by the stranded stats collection
     pub fn build_histogram(
         &mut self,
+        upper_bound: u64,
+        lower_bound: u64,
         num_buckets: u64,
     ) {        
         self.histogram.build(
-            num_buckets, 
+            upper_bound,
+            lower_bound,
+            num_buckets,
             &self.stranded_nodes
                 .values()
                 .map(|&(_, value)| value)
@@ -815,6 +956,13 @@ impl StrandedNodeCollection {
         &self,
     ) -> &Histogram {
         &self.histogram
+    }
+
+    pub fn get_stranded_node_stats_by_iteration(
+        &self,
+        index: usize,
+    ) -> &StrandedNodeStats {
+        &self.per_iter_stranded_node_stats[index]
     }
 
 }
@@ -853,7 +1001,6 @@ pub struct SimulationParamaters {
     pub probability_of_rotation: f64,
     pub prune_stake_threshold: f64,
     pub min_ingress_nodes: usize,
-    pub fail_nodes: bool,
     pub fraction_to_fail: f64,
     pub when_to_fail: usize,
     pub test_type: Testing,
@@ -871,7 +1018,6 @@ impl Default for SimulationParamaters {
             probability_of_rotation: 0.0,
             prune_stake_threshold: 0.0,
             min_ingress_nodes: 0,
-            fail_nodes: false,
             fraction_to_fail: 0.0,
             when_to_fail: 0,
             test_type: Testing::NoTest,
@@ -886,7 +1032,7 @@ pub struct GossipStats {
     hops_stats: HopsStatCollection,
     coverage_stats: StatCollection,
     relative_message_redundancy_stats: StatCollection,
-    stranded_nodes: StrandedNodeCollection,
+    stranded_node_collection: StrandedNodeCollection,
     outbound_branching_factors: StatCollection,
     origin: Pubkey,
     pub simulation_parameters: SimulationParamaters,
@@ -899,7 +1045,7 @@ impl Default for GossipStats {
             hops_stats: HopsStatCollection::default(), 
             coverage_stats: StatCollection::new("Coverage"),
             relative_message_redundancy_stats: StatCollection::new("RMR"),
-            stranded_nodes: StrandedNodeCollection::default(),
+            stranded_node_collection: StrandedNodeCollection::default(),
             outbound_branching_factors: StatCollection::new("Outbound Branching Factor"),
             origin: Pubkey::default(),
             simulation_parameters: SimulationParamaters::default(),
@@ -934,7 +1080,6 @@ impl GossipStats {
             probability_of_rotation: config.probability_of_rotation,
             prune_stake_threshold: config.prune_stake_threshold,
             min_ingress_nodes: config.min_ingress_nodes, 
-            fail_nodes: config.fail_nodes,
             fraction_to_fail: config.fraction_to_fail,
             when_to_fail: config.when_to_fail,
             test_type: config.test_type,
@@ -952,6 +1097,13 @@ impl GossipStats {
                 .values()
                 .cloned()
                 .collect());
+    }
+
+    pub fn get_hops_stat_by_iteration(
+        &self,
+        index: usize,
+    ) -> &HopsStat {
+        &self.hops_stats.get_stat_by_iteration(index)
     }
 
     pub fn print_hops_stats(
@@ -983,9 +1135,11 @@ impl GossipStats {
 
     pub fn build_aggregate_hops_stats_histogram(
         &mut self,
+        upper_bound: u64,
+        lower_bound: u64,
         num_buckets: u64,
     ) {
-        self.hops_stats.build_histogram(num_buckets);
+        self.hops_stats.build_histogram(upper_bound, lower_bound, num_buckets);
     }
 
     fn print_histogram(
@@ -1047,6 +1201,12 @@ impl GossipStats {
         )
     }
 
+    pub fn get_aggregate_hop_stat_histogram(
+        &self,
+    ) -> &Histogram {
+        self.hops_stats.get_histogram()
+    }
+
     pub fn calculate_last_delivery_hop_stats(
         &mut self,
     ) {
@@ -1103,6 +1263,12 @@ impl GossipStats {
         )
     }
 
+    pub fn get_coverage_stat_collection(
+        &self,
+    ) -> &StatCollection {
+        &self.coverage_stats
+    }
+
     pub fn print_coverage_stats(
         &self,
     ) {
@@ -1157,13 +1323,26 @@ impl GossipStats {
         stranded_nodes: &Vec<Pubkey>,
         stakes: &HashMap<Pubkey, u64>,
     ) {
-        self.stranded_nodes.insert_nodes(stranded_nodes, stakes);
+        self.stranded_node_collection.insert_nodes(stranded_nodes, stakes);
     }
 
     pub fn get_stranded_nodes(
         &self,
     ) -> Vec<(Pubkey, (u64, u64))> {
-        self.stranded_nodes.get_sorted_stranded()
+        self.stranded_node_collection.get_sorted_stranded()
+    }
+
+    pub fn get_stranded_node_iterations(
+        &self,
+    ) -> u64 {
+        self.stranded_node_collection.get_total_stranded_iterations()
+    }
+
+    pub fn get_stranded_node_stats_by_iteration(
+        &self,
+        index: usize,
+    ) -> &StrandedNodeStats {
+        self.stranded_node_collection.get_stranded_node_stats_by_iteration(index)
     }
 
     pub fn print_stranded(
@@ -1172,8 +1351,8 @@ impl GossipStats {
         info!("|----------------------------------------------------------|");
         info!("|---- STRANDED NODES (Pubkey, stake, # times stranded) ----|");
         info!("|----------------------------------------------------------|"); 
-        info!("Total stranded nodes: {}", self.stranded_nodes.stranded_count());
-        for (node, (stake, count)) in self.stranded_nodes.get_sorted_stranded().iter() {
+        info!("Total stranded nodes: {}", self.stranded_node_collection.stranded_count());
+        for (node, (stake, count)) in self.stranded_node_collection.get_sorted_stranded().iter() {
             if stake == &0 {
                 info!("{:?},\t{},\t\t{}", node, stake, count);
             } else {
@@ -1198,14 +1377,14 @@ impl GossipStats {
         f64, // weighted mean stake of stranded nodes
         f64, // weighted median stake of stranded nodes
     ) {
-        let stake_stats = self.stranded_nodes.get_stranded_stake_stats();
-        let weighted_stake_stats = self.stranded_nodes.get_weighted_stranded_stake_stats();
+        let stake_stats = self.stranded_node_collection.get_stranded_stake_stats();
+        let weighted_stake_stats = self.stranded_node_collection.get_weighted_stranded_stake_stats();
         (
-            self.stranded_nodes.get_total_stranded_iterations(),
-            self.stranded_nodes.get_stranded_iterations_per_node(),
-            self.stranded_nodes.get_mean_stranded_per_iteration(),
-            self.stranded_nodes.get_mean_standed_iterations_per_stranded_node(),
-            self.stranded_nodes.get_median_standed_iterations_per_stranded_node(),
+            self.stranded_node_collection.get_total_stranded_iterations(),
+            self.stranded_node_collection.get_stranded_iterations_per_node(),
+            self.stranded_node_collection.get_mean_stranded_per_iteration(),
+            self.stranded_node_collection.get_mean_standed_iterations_per_stranded_node(),
+            self.stranded_node_collection.get_median_standed_iterations_per_stranded_node(),
             stake_stats.0, 
             stake_stats.1, 
             stake_stats.2, 
@@ -1215,11 +1394,25 @@ impl GossipStats {
         )
     }
 
+    pub fn get_stranded_node_iteration_data(
+        &self,
+    ) -> (u64, f64, f64, f64, f64, f64, f64) {
+        let weighted_stake_stats = self.stranded_node_collection.get_weighted_stranded_stake_stats();
+        (
+            self.stranded_node_collection.get_total_stranded_iterations(),
+            self.stranded_node_collection.get_stranded_iterations_per_node(),
+            self.stranded_node_collection.get_mean_stranded_per_iteration(),
+            self.stranded_node_collection.get_mean_standed_iterations_per_stranded_node(),
+            self.stranded_node_collection.get_median_standed_iterations_per_stranded_node(),
+            weighted_stake_stats.0,
+            weighted_stake_stats.1,
+        )
+    }
 
     pub fn calculate_stranded_stats(
         &mut self,
     ) {
-        self.stranded_nodes.calculate_stats();
+        self.stranded_node_collection.calculate_stats();
     }
 
     pub fn print_stranded_stats(
@@ -1228,37 +1421,39 @@ impl GossipStats {
         info!("|-----------------------------|");
         info!("|---- STRANDED NODE STATS ----|");
         info!("|-----------------------------|"); 
-        info!("Total stranded node iterations -> SUM(stranded_node_iterations): {}", self.stranded_nodes.get_total_stranded_iterations());
+        info!("Total stranded node iterations -> SUM(stranded_node_iterations): {}", self.stranded_node_collection.get_total_stranded_iterations());
         // total_stranded_iterations / all gossip nodes
         // on average how many iterations was a gossip node stranded across our test
         // may not be great stat since median is likely to be 0 every time
-        info!("Mean number of iterations a gossip node was stranded for: {:.6}", self.stranded_nodes.get_stranded_iterations_per_node());
+        info!("Mean number of iterations a gossip node was stranded for: {:.6}", self.stranded_node_collection.get_stranded_iterations_per_node());
         
         // avg number of nodes stranded during each gossip iteration
-        info!("Mean number of nodes stranded during each gossip iteration: {:.6}", self.stranded_nodes.get_mean_stranded_per_iteration());
+        info!("Mean number of nodes stranded during each gossip iteration: {:.6}", self.stranded_node_collection.get_mean_stranded_per_iteration());
         
         // avg number of iterations a stranded node was stranded for 
-        info!("Mean number of iterations a stranded node was stranded for: {:.6}", self.stranded_nodes.get_mean_standed_iterations_per_stranded_node());
+        info!("Mean number of iterations a stranded node was stranded for: {:.6}", self.stranded_node_collection.get_mean_standed_iterations_per_stranded_node());
         
         // median number of iterations a stranded node was stranded for  
-        info!("Median number of iterations a stranded node was stranded for: {}", self.stranded_nodes.get_median_standed_iterations_per_stranded_node());
+        info!("Median number of iterations a stranded node was stranded for: {}", self.stranded_node_collection.get_median_standed_iterations_per_stranded_node());
 
-        let stake_stats = self.stranded_nodes.get_stranded_stake_stats();
+        let stake_stats = self.stranded_node_collection.get_stranded_stake_stats();
         info!("Mean stake: {:.2}", stake_stats.0);
         info!("Median stake: {}", stake_stats.1);
         info!("Max stake: {}", stake_stats.2);
         info!("Min stake: {}", stake_stats.3);
 
-        let weighted_stake_stakes = self.stranded_nodes.get_weighted_stranded_stake_stats();
+        let weighted_stake_stakes = self.stranded_node_collection.get_weighted_stranded_stake_stats();
         info!("Mean Weighted stake: {:.2}", weighted_stake_stakes.0);
         info!("Median Weighted stake: {}", weighted_stake_stakes.1);
     }
 
     pub fn build_stranded_node_histogram(
         &mut self,
+        upper_bound: u64,
+        lower_bound: u64,
         num_buckets: u64,
     ) {
-        self.stranded_nodes.build_histogram(num_buckets);
+        self.stranded_node_collection.build_histogram(upper_bound, lower_bound, num_buckets);
     }
 
     pub fn print_stranded_node_histogram(
@@ -1266,8 +1461,14 @@ impl GossipStats {
     ) {
         self.print_histogram(
             "STRANDED NODES".to_string(),
-            self.stranded_nodes.get_histogram()
+            self.stranded_node_collection.get_histogram()
         )
+    }
+
+    pub fn get_stranded_node_histogram(
+        &self,
+    ) -> &Histogram {
+        self.stranded_node_collection.get_histogram()
     }
 
     pub fn print_branching_factor_stats(
@@ -1333,15 +1534,12 @@ impl GossipStats {
 
     pub fn run_all_calculations(
         &mut self,
-        num_buckets: u64,
     ) {
         self.calculate_coverage_stats();
         self.calculate_rmr_stats();
         self.calculate_aggregate_hop_stats();
-        self.build_aggregate_hops_stats_histogram(num_buckets);
         self.calculate_last_delivery_hop_stats();
         self.calculate_stranded_stats();
-        self.build_stranded_node_histogram(num_buckets);
         self.calculate_branching_factor_stats();
     }
 
@@ -1358,7 +1556,6 @@ impl GossipStats {
         self.print_stranded();
         self.print_failed_nodes();
         self.print_branching_factor_stats();
-        // self.print_hops_stats();
     }
 }
 
@@ -1407,7 +1604,7 @@ impl GossipStatsCollection {
     ) {
         let mut total_stranded_iterations: u64 = 0;
         for gossip_stat in self.gossip_stats_collection.iter() {
-            total_stranded_iterations += gossip_stat.stranded_nodes.get_total_stranded_iterations();
+            total_stranded_iterations += gossip_stat.stranded_node_collection.get_total_stranded_iterations();
         }
         info!("Total stranded node iterations across all simulations {}", total_stranded_iterations);
     }
@@ -1620,12 +1817,7 @@ mod tests {
                 cluster.prune_connections(&node_map, &stakes);
             }
 
-            let seed = [42u8; 32];
-            let mut rotate_seed_rng = StdRng::from_seed(seed);
-            let mut rotate_seed_rng_2 = StdRng::from_seed(seed);
-            cluster.chance_to_rotate(&mut rotate_seed_rng_2, &mut nodes, ACTIVE_SET_SIZE, &stakes, CHANCE_TO_ROTATE, &mut rotate_seed_rng);
-        
-            
+            cluster.chance_to_rotate( &mut nodes, ACTIVE_SET_SIZE, &stakes, CHANCE_TO_ROTATE);
         }
 
         assert_eq!(gossip_stats.get_rmr_by_index(0), 2.8);

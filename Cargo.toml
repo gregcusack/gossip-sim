@@ -22,6 +22,12 @@ solana-sdk = { git = "https://github.com/solana-labs/solana" }
 thiserror = "1.0.31"
 serde_yaml = "0.8.24"
 rand_chacha = "0.2.2"
+url = "2.2"
+reqwest="0.11.11"
+tokio = { version = "~1.14.1", features = ["full"] }
+dotenv = "0.15.0"
+async-std = "1.12.0"
+
 
 [dev-dependencies]
 rand_chacha = "0.2.2"
