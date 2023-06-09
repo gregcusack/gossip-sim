@@ -354,13 +354,6 @@ impl RelativeMessageRedundancy {
         self.m += 1;
     }
 
-    pub fn increment_m_by(
-        &mut self,
-        amount: usize
-    ) {
-        self.m += amount as u64;
-    }
-
     pub fn increment_n(
         &mut self,
     ) {
