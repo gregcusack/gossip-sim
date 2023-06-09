@@ -444,7 +444,7 @@ fn run_simulation(
                     datapoint.create_hops_stat_point(
                         stats.get_hops_stat_by_iteration(steady_state_iteration)
                     );
-        
+    
                     datapoint.create_stranded_node_stat_point(
                         stats.get_stranded_node_stats_by_iteration(steady_state_iteration)
                     );
@@ -473,8 +473,45 @@ fn run_simulation(
     }
 
     if !stats.is_empty() {
-        stats.run_all_calculations(config.num_buckets_for_stranded_node_hist);
+        stats.build_stranded_node_histogram(
+            (config.gossip_iterations - config.warm_up_rounds) as u64, 
+            0, 
+            config.num_buckets_for_stranded_node_hist,
+        );
+        stats.build_aggregate_hops_stats_histogram(30, 0, 15);
+
+        stats.run_all_calculations();
         gossip_stats_collection.push(stats.clone());
+
+        match datapoint_queue {
+            Some(dp_queue) => {
+                let mut datapoint = InfluxDataPoint::default();
+                let data = stats.get_stranded_node_iteration_data();
+                datapoint.create_stranded_iteration_point(
+                    data.0,
+                    data.1,
+                    data.2,
+                    data.3,
+                    data.4,
+                    data.5,
+                    data.6
+                );
+
+                datapoint.create_histogram_point(
+                    "stranded_node_histogram".to_string(),
+                    stats.get_stranded_node_histogram()
+                );
+
+                datapoint.create_histogram_point(
+                    "aggregate_hops_histogram".to_string(),
+                    stats.get_aggregate_hop_stat_histogram()
+                );
+
+                datapoint.create_iteration_point(0, simulation_iteration);
+                dp_queue.lock().unwrap().push_back(datapoint);             
+            }
+            _ => { }
+        }
     }
 }
 
