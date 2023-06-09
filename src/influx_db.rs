@@ -440,9 +440,9 @@ impl InfluxDataPoint {
             let bucket_min = histogram.min_entry() + bucket * histogram.bucket_range();
             let bucket_max = histogram.min_entry() + (bucket + 1) * histogram.bucket_range() - 1;
             if bucket_min == bucket_max {
-                info!("Bucket: {}: Count: {}", bucket_max, count);
+                debug!("Bucket: {}: Count: {}", bucket_max, count);
             } else {
-                info!("Bucket: {}-{}: Count: {}", bucket_min, bucket_max, count);
+                debug!("Bucket: {}-{}: Count: {}", bucket_min, bucket_max, count);
             }
             let data_point  = format!("{} bucket={},count={} ", data_type, bucket_max, count);
 
