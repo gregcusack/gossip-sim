@@ -6,6 +6,7 @@ use {
     crate::gossip_stats::{
         HopsStat,
         StrandedNodeStats,
+        Histogram,
     },
     std::{
         time::{SystemTime, UNIX_EPOCH},
@@ -316,6 +317,12 @@ impl InfluxDataPoint {
         self.datapoint.push_str(self.timestamp.as_str());
     }
 
+    pub fn set_and_append_timestamp(
+        &mut self,
+    ) {
+        self.datapoint.push_str(self.get_timestamp_now().as_str());
+    }
+
     pub fn create_data_point(
         &mut self,
         data: f64,
@@ -394,4 +401,57 @@ impl InfluxDataPoint {
         self.datapoint.push_str(data_point.as_str());
         self.append_timestamp();
     }
+
+    pub fn create_stranded_iteration_point(
+        &mut self,
+        total_stranded_iterations_count: u64,
+        mean_number_of_iterations_node_stranded_for: f64,        
+        mean_number_of_nodes_stranded_during_each_iteration: f64,
+        mean_number_of_iterations_a_stranded_node_was_stranded_for: f64,
+        median_number_of_iterations_a_stranded_node_was_stranded_for: f64,
+        mean_weighted_stake: f64,
+        median_weighted_stake: f64,
+    ) {
+        let data_point = format!("stranded_node_iterations total_stranded={},\
+            mean_iter_stranded_per_node={},\
+            mean_stranded_per_iter={},\
+            mean_iter_stranded={},\
+            median_iter_stranded={},\
+            mean_weighted_stake={},\
+            median_weighted_stake={} ", 
+            total_stranded_iterations_count,
+            mean_number_of_iterations_node_stranded_for,
+            mean_number_of_nodes_stranded_during_each_iteration,
+            mean_number_of_iterations_a_stranded_node_was_stranded_for,
+            median_number_of_iterations_a_stranded_node_was_stranded_for,
+            mean_weighted_stake,
+            median_weighted_stake,
+            );
+        self.datapoint.push_str(data_point.as_str());
+        self.append_timestamp();
+    }
+
+    pub fn create_histogram_point(
+        &mut self,
+        data_type: String,
+        histogram: &Histogram
+    ) {
+        for (bucket, count) in histogram.entries().iter() {
+            let bucket_min = histogram.min_entry() + bucket * histogram.bucket_range();
+            let bucket_max = histogram.min_entry() + (bucket + 1) * histogram.bucket_range() - 1;
+            if bucket_min == bucket_max {
+                debug!("Bucket: {}: Count: {}", bucket_max, count);
+            } else {
+                debug!("Bucket: {}-{}: Count: {}", bucket_min, bucket_max, count);
+            }
+            let data_point  = format!("{} bucket={},count={} ", data_type, bucket_max, count);
+
+            self.datapoint.push_str(data_point.as_str());
+            self.set_and_append_timestamp();
+        }
+
+        debug!("histogram point: {}", self.datapoint);
+    }
+
+
 }

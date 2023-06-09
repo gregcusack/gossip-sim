@@ -192,9 +192,11 @@ impl HopsStatCollection {
     //TODO: turn this into its own object that is held by the stranded stats collection
     pub fn build_histogram(
         &mut self,
+        upper_bound: u64,
+        lower_bound: u64,
         num_buckets: u64,
     ) {
-        self.histogram.build(num_buckets, &self.raw_hop_collection);
+        self.histogram.build(upper_bound, lower_bound, num_buckets, &self.raw_hop_collection);
     }
 
     pub fn get_histogram(
@@ -417,49 +419,44 @@ impl Default for Histogram {
 }
 
 impl Histogram {
-    //TODO: turn this into its own object that is held by the stranded stats collection
     pub fn build(
         &mut self,
+        upper_bound: u64,
+        lower_bound: u64,
         num_buckets: u64,
         input_entries: &Vec<u64>,
-    ) {        
-        self.set_num_buckets(num_buckets);
-        // Determine the range of each bucket
-        self.set_min_entry(
-            input_entries
-                    .iter()
-                    .map(|entry| *entry)
-                    .min()
-                    .unwrap_or(0));
+    ) {
+        self.min_entry = lower_bound;
+        self.max_entry = upper_bound;
+        self.num_buckets = num_buckets;
 
-        self.set_max_entry(
-            input_entries
-                    .iter()
-                    .map(|entry| *entry)
-                    .max()
-                    .unwrap_or(0));
-
-
-        if self.max_entry == self.min_entry {
-            warn!("WARNING: Max and Min histogram entries are the same.");
-            self.set_bucket_range(1);
+        if upper_bound == lower_bound || lower_bound + 1 == upper_bound {
+            warn!("WARNING: Max and Min histogram entries are the same or off by 1.");
+            self.bucket_range = 1;
         } else {
-            self.set_bucket_range(
-                (self.max_entry - self.min_entry + self.num_buckets - 1) / self.num_buckets);    
+            self.bucket_range = (upper_bound - lower_bound) / num_buckets;
         }
 
+        debug!("histogram_v2: upper, lower, buckets, range: {}, {}, {}, {}", upper_bound, lower_bound, num_buckets, self.bucket_range);
+
         // Initialize all buckets with 0 entries
+        self.entries.clear();
         for bucket in 0..self.num_buckets {
             self.entries.insert(bucket, 0);
         }
- 
-        // Iterate over the stranded_nodes entries
-        for hops in input_entries.iter() {
-            // Determine the bucket index based on the times_stranded value
-            let bucket = (*hops - self.min_entry) / self.bucket_range;
-            
-            // Increment the count for the bucket in the histogram
-            *self.entries.entry(bucket).or_insert(0) += 1;
+
+        // Iterate over the input_entries
+        for entry in input_entries.iter() {
+            // Check if the entry is within the defined bounds
+            if *entry >= self.min_entry && *entry <= self.max_entry {
+                // Determine the bucket index based on the entry value
+                let bucket = (entry - self.min_entry) / self.bucket_range;
+
+                // Increment the count for the bucket in the histogram
+                *self.entries.entry(bucket).or_insert(0) += 1;
+            } else {
+                error!("ERROR. Histogram: Entry > max_entry or < min_entry. entry: {}, max_entry: {}, min_entry: {}", entry, self.max_entry, self.min_entry);
+            }
         }
     }
 
@@ -515,7 +512,11 @@ impl Histogram {
         self.num_buckets
     }
 
-
+    pub fn entries(
+        &self,
+    ) -> &BTreeMap<u64, u64> {
+        &self.entries
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -683,7 +684,7 @@ impl Default for StrandedNodeCollection {
             weighted_total_stranded_stake: 0,
             weighted_stranded_node_mean_stake: 0.0,
             weighted_stranded_node_median_stake: 0.0, 
-            histogram: Histogram::default(),    
+            histogram: Histogram::default(), 
         }
     }
 }
@@ -911,10 +912,14 @@ impl StrandedNodeCollection {
     //TODO: turn this into its own object that is held by the stranded stats collection
     pub fn build_histogram(
         &mut self,
+        upper_bound: u64,
+        lower_bound: u64,
         num_buckets: u64,
     ) {        
         self.histogram.build(
-            num_buckets, 
+            upper_bound,
+            lower_bound,
+            num_buckets,
             &self.stranded_nodes
                 .values()
                 .map(|&(_, value)| value)
@@ -1108,9 +1113,11 @@ impl GossipStats {
 
     pub fn build_aggregate_hops_stats_histogram(
         &mut self,
+        upper_bound: u64,
+        lower_bound: u64,
         num_buckets: u64,
     ) {
-        self.hops_stats.build_histogram(num_buckets);
+        self.hops_stats.build_histogram(upper_bound, lower_bound, num_buckets);
     }
 
     fn print_histogram(
@@ -1170,6 +1177,12 @@ impl GossipStats {
             stats.max(),
             stats.min(),
         )
+    }
+
+    pub fn get_aggregate_hop_stat_histogram(
+        &self,
+    ) -> &Histogram {
+        self.hops_stats.get_histogram()
     }
 
     pub fn calculate_last_delivery_hop_stats(
@@ -1297,6 +1310,12 @@ impl GossipStats {
         self.stranded_node_collection.get_sorted_stranded()
     }
 
+    pub fn get_stranded_node_iterations(
+        &self,
+    ) -> u64 {
+        self.stranded_node_collection.get_total_stranded_iterations()
+    }
+
     pub fn get_stranded_node_stats_by_iteration(
         &self,
         index: usize,
@@ -1353,6 +1372,20 @@ impl GossipStats {
         )
     }
 
+    pub fn get_stranded_node_iteration_data(
+        &self,
+    ) -> (u64, f64, f64, f64, f64, f64, f64) {
+        let weighted_stake_stats = self.stranded_node_collection.get_weighted_stranded_stake_stats();
+        (
+            self.stranded_node_collection.get_total_stranded_iterations(),
+            self.stranded_node_collection.get_stranded_iterations_per_node(),
+            self.stranded_node_collection.get_mean_stranded_per_iteration(),
+            self.stranded_node_collection.get_mean_standed_iterations_per_stranded_node(),
+            self.stranded_node_collection.get_median_standed_iterations_per_stranded_node(),
+            weighted_stake_stats.0,
+            weighted_stake_stats.1,
+        )
+    }
 
     pub fn calculate_stranded_stats(
         &mut self,
@@ -1394,9 +1427,11 @@ impl GossipStats {
 
     pub fn build_stranded_node_histogram(
         &mut self,
+        upper_bound: u64,
+        lower_bound: u64,
         num_buckets: u64,
     ) {
-        self.stranded_node_collection.build_histogram(num_buckets);
+        self.stranded_node_collection.build_histogram(upper_bound, lower_bound, num_buckets);
     }
 
     pub fn print_stranded_node_histogram(
@@ -1406,6 +1441,12 @@ impl GossipStats {
             "STRANDED NODES".to_string(),
             self.stranded_node_collection.get_histogram()
         )
+    }
+
+    pub fn get_stranded_node_histogram(
+        &self,
+    ) -> &Histogram {
+        self.stranded_node_collection.get_histogram()
     }
 
     pub fn print_branching_factor_stats(
@@ -1471,15 +1512,12 @@ impl GossipStats {
 
     pub fn run_all_calculations(
         &mut self,
-        num_buckets: u64,
     ) {
         self.calculate_coverage_stats();
         self.calculate_rmr_stats();
         self.calculate_aggregate_hop_stats();
-        self.build_aggregate_hops_stats_histogram(num_buckets);
         self.calculate_last_delivery_hop_stats();
         self.calculate_stranded_stats();
-        self.build_stranded_node_histogram(num_buckets);
         self.calculate_branching_factor_stats();
     }
 
@@ -1496,7 +1534,6 @@ impl GossipStats {
         self.print_stranded();
         self.print_failed_nodes();
         self.print_branching_factor_stats();
-        // self.print_hops_stats();
     }
 }
 
