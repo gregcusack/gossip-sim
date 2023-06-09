@@ -1,9 +1,26 @@
 use {
-    crate::{Stats, HopsStats},
-    log::{info, error, warn, debug},
-    std::collections::{HashMap, BTreeMap, HashSet},
+    crate::{
+        Stats, 
+        HopsStats
+    },
+    log::{
+        info, 
+        error, 
+        warn, 
+        debug, 
+        trace
+    },
+    std::collections::{
+        HashMap, 
+        BTreeMap, 
+        HashSet
+    },
     solana_sdk::pubkey::Pubkey,
-    crate::gossip::{Testing, StepSize, Config},
+    crate::gossip::{
+        Testing, 
+        StepSize, 
+        Config
+    },
 };
 
 // stores stats about a single run of mst. 
@@ -354,6 +371,13 @@ impl RelativeMessageRedundancy {
         self.m += 1;
     }
 
+    pub fn increment_m_by(
+        &mut self,
+        amount: usize
+    ) {
+        self.m += amount as u64;
+    }
+
     pub fn increment_n(
         &mut self,
     ) {
@@ -375,6 +399,7 @@ impl RelativeMessageRedundancy {
             Err("Division by zero. n is 0.".to_string())
         } else {
             self.rmr = self.m as f64 / (self.n - 1) as f64 - 1.0;
+            trace!("RMR: {}, m: {}, n: {}", self.rmr, self.m, self.n);
             Ok(self.rmr)
         }
     }
