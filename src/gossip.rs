@@ -583,9 +583,9 @@ impl Cluster {
                 },
             };
             let mut sorted_hops: Vec<(&Pubkey, &u64)> = sources.iter().collect();
-            sorted_hops.sort_by(|&(key1, hops1), &(key2, hops2)| {
+            sorted_hops.sort_by(|&(pk1, hops1), &(pk2, hops2)| {
                 if hops1 == hops2 {
-                    key1.to_string().cmp(&key2.to_string())
+                    pk1.to_string().cmp(&pk2.to_string())
                 } else {
                     hops1.cmp(hops2)
                 }
@@ -624,9 +624,13 @@ impl Cluster {
                 .zip(repeat(origin))
                 .into_group_map();
 
-            // add in prunes to total messages sent for rmr
+            // // add in prunes to total messages sent for rmr
+            // NOTE: technically a prune is a control message and should not be included according to plumtree paper
+            // Thought is that control messages are relatively small compared to push messages so don't take up
+            // too much bandwidth. 
             for (_, prunees) in prunes.iter() {
                 self.rmr.increment_m_by(prunees.len());
+                trace!("prunees.len: {}", prunees.len());
             }
 
             //for the current node, add in it's prunes
