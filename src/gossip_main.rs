@@ -496,7 +496,11 @@ fn run_simulation(
             0, 
             config.num_buckets_for_stranded_node_hist,
         );
-        stats.build_aggregate_hops_stats_histogram(50, 0, 25);
+        stats.build_aggregate_hops_stats_histogram(
+            (40.0 * (1.0 + config.fraction_to_fail)) as u64,
+                0,
+                25
+        );
 
         stats.run_all_calculations();
         gossip_stats_collection.push(stats.clone());
