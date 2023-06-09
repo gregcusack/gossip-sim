@@ -8,6 +8,10 @@ use {
         StrandedNodeStats,
         Histogram,
     },
+    crate::gossip::{
+        Testing,
+        StepSize,
+    },
     std::{
         time::{SystemTime, UNIX_EPOCH},
         sync::{Arc, Mutex},
@@ -55,7 +59,6 @@ impl ReportToInflux {
                 .send()
                 .await;
         
-
         match response {
             Ok(response) => {
                 if response.status().is_success() {
@@ -382,6 +385,39 @@ impl InfluxDataPoint {
         self.append_timestamp();
     }
 
+    pub fn create_test_type_point(
+        &mut self,
+        num_simulations: usize,
+        gossip_iterations_per_simulation: usize,
+        warm_up_rounds: usize,
+        step_size: StepSize,
+        node_count: usize,
+        probability_of_rotation: f64,
+        api: &str,
+        test_type: Testing,
+    ) {
+        let data_point = format!("simulation_config num_simulations={},\
+            gossip_iterations_per_simulation={},\
+            warm_up_rounds={},\
+            step_size={},\
+            node_count={},\
+            probability_of_rotation={},\
+            api=\"{}\",\
+            test_type=\"{}\" ",
+                num_simulations,
+                gossip_iterations_per_simulation,
+                warm_up_rounds,
+                step_size,
+                node_count,
+                probability_of_rotation,
+                api,
+                test_type
+        );
+        info!("datapoint: {}", data_point);
+        self.datapoint.push_str(data_point.as_str());
+        self.append_timestamp();
+    }
+
     pub fn create_config_point(
         &mut self,
         push_fanout: usize,
@@ -389,15 +425,21 @@ impl InfluxDataPoint {
         origin_rank: usize,
         prune_stake_threshold: f64,
         min_ingress_nodes: usize,
+        fraction_to_fail: f64,
     ) {
-        let data_point = format!("config push_fanout={},active_set_size={},origin_rank={},prune_stake_threshold={},min_ingress_nodes={} ",
-            push_fanout, 
-            active_set_size,
-            origin_rank,
-            prune_stake_threshold,
-            min_ingress_nodes
+        let data_point = format!("config push_fanout={},\
+            active_set_size={},\
+            origin_rank={},\
+            prune_stake_threshold={},\
+            min_ingress_nodes={},\
+            fraction_to_fail={} ",
+                push_fanout, 
+                active_set_size,
+                origin_rank,
+                prune_stake_threshold,
+                min_ingress_nodes,
+                fraction_to_fail,
         );
-
         self.datapoint.push_str(data_point.as_str());
         self.append_timestamp();
     }
