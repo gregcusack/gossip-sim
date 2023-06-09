@@ -70,7 +70,7 @@ cargo run --bin gossip-sim --
     --origin-rank <origin_stake_rank> 
     --rotation-probability <probability-of-active-set-rotation> 
     --min-ingress-nodes <min-ingress-nodes> 
-    --stake-threshold <min-stake-threshold>
+    --prune-stake-threshold <prune-stake-threshold>
     --filter-zero-staked-nodes
     --num-buckets <num-buckets-for-histogram>
     --warm-up-rounds <warm_up_rounds>
@@ -89,7 +89,7 @@ cargo run --bin gossip-sim --
     --origin-rank <origin_stake_rank> 
     --rotation-probability <probability-of-active-set-rotation> 
     --min-ingress-nodes <min-ingress-nodes> 
-    --stake-threshold <min-stake-threshold>
+    --prune-stake-threshold <prune-stake-threshold>
     --filter-zero-staked-nodes
     --num-buckets <num-buckets-for-histogram>
     --warm-up-rounds <warm_up_rounds>
@@ -105,7 +105,7 @@ cargo run --bin gossip-sim --
     --origin-rank <origin_stake_rank> 
     --rotation-probability <probability-of-active-set-rotation> 
     --min-ingress-nodes <min-ingress-nodes> 
-    --stake-threshold <min-stake-threshold>
+    --prune-stake-threshold <prune-stake-threshold>
     --filter-zero-staked-nodes
     --num-buckets <num-buckets-for-histogram>
     --test-type <test-type>
@@ -118,8 +118,9 @@ cargo run --bin gossip-sim --
 active-set-size
 push-fanout
 min-ingress-nodes
-min-stake-threshold
+prune-stake-threshold
 origin-rank
+fail-nodes
 [default: no-test]
 ```
 So if `test-type` is set to `active-set-size`, the first simulation will run gossip with an `active-set-size` of `--active-set-size <active_set_size>` passed in. 
@@ -137,15 +138,14 @@ cargo run --bin gossip-sim --
     --origin-rank <origin_stake_rank> 
     --rotation-probability <probability-of-active-set-rotation> 
     --min-ingress-nodes <min-ingress-nodes> 
-    --stake-threshold <min-stake-threshold>
+    --prune-stake-threshold <prune-stake-threshold>
     --filter-zero-staked-nodes
     --num-buckets <num-buckets-for-histogram>
-    --fail-nodes
     --when-to-fail <gossip-iteration-to-fail-nodes-on>
     --fraction-to-fail <fraction-of-nodes-to-fail (0 < f < 1)>
     --warm-up-rounds <warm_up_rounds>
 ```
-`fraction-to-fail` * total-nodes will fail right before the `when-to-fail`-th gossip iteration is run
+`fraction-to-fail` * total-nodes will fail right before the `when-to-fail`-th gossip iteration is run. This also runs as Option 5 above. Start at `fraction-to-fail` and increase fraction by `step-size` on each iteration.
 
 #### Option 6: Push results to influx
 - This will pull all node accounts from mainnet and simulate the network and push all results to an influxDB instance
@@ -157,10 +157,9 @@ cargo run --bin gossip-sim --
     --origin-rank <origin_stake_rank> 
     --rotation-probability <probability-of-active-set-rotation> 
     --min-ingress-nodes <min-ingress-nodes> 
-    --stake-threshold <min-stake-threshold>
+    --prune-stake-threshold <prune-stake-threshold>
     --filter-zero-staked-nodes
     --num-buckets <num-buckets-for-histogram>
-    --fail-nodes
     --when-to-fail <gossip-iteration-to-fail-nodes-on>
     --fraction-to-fail <fraction-of-nodes-to-fail (0 < f < 1)>
     --warm-up-rounds <warm_up_rounds>

@@ -129,7 +129,7 @@ fn parse_matches() -> ArgMatches {
         )
         .arg(
             Arg::with_name("prune_stake_threshold")
-                .long("stake-threshold")
+                .long("prune-stake-threshold")
                 .takes_value(true)
                 .default_value(".15")
                 .validator(|s| match s.parse::<f64>() {
@@ -156,7 +156,7 @@ fn parse_matches() -> ArgMatches {
                     active-set-size
                     push-fanout
                     min-ingress-nodes
-                    min-stake-threshold
+                    prune-stake-threshold
                     origin-rank
                     fail-nodes
                     [default: no-test]
@@ -264,6 +264,7 @@ fn run_simulation(
     gossip_stats_collection: &mut GossipStatsCollection, 
     datapoint_queue: &Option<Arc<Mutex<VecDeque<InfluxDataPoint>>>>,
     simulation_iteration: usize,
+    start_value: f64,
 ) {
     info!("##### SIMULATION ITERATION: {} #####", simulation_iteration);
     let node_account_location: &str;
@@ -323,6 +324,10 @@ fn run_simulation(
         match datapoint_queue {
             Some(ref dp_queue) => {
                 let mut datapoint = InfluxDataPoint::default();
+                let mut start = start_value.to_string();
+                if config.test_type == Testing::NoTest {
+                    start = "N/A".to_string();
+                }
                 datapoint.create_test_type_point(
                     config.num_simulations,
                     config.gossip_iterations,
@@ -331,6 +336,7 @@ fn run_simulation(
                     nodes.len(),
                     config.probability_of_rotation,
                     node_account_location,
+                    start,
                     config.test_type,
                 );
                 dp_queue.lock().unwrap().push_back(datapoint);
@@ -653,7 +659,14 @@ fn main() {
                 config.gossip_active_set_size = active_set_size;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &datapoint_queue, i);
+                run_simulation(
+                    &config, 
+                    &matches, 
+                    &mut gossip_stats_collection, 
+                    &datapoint_queue, 
+                    i, 
+                    initial_active_set_size as f64,
+                );
             }
         }
         Testing::PushFanout => {
@@ -668,7 +681,14 @@ fn main() {
                 config.gossip_push_fanout = push_fanout;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &datapoint_queue, i);
+                run_simulation(
+                    &config, 
+                    &matches, 
+                    &mut gossip_stats_collection, 
+                    &datapoint_queue, 
+                    i, 
+                    initial_push_fanout as f64,
+                );            
             }
 
         }
@@ -684,10 +704,17 @@ fn main() {
                 config.min_ingress_nodes = min_ingress_nodes;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &datapoint_queue, i);
-            }
+                run_simulation(
+                    &config, 
+                    &matches, 
+                    &mut gossip_stats_collection, 
+                    &datapoint_queue, 
+                    i, 
+                    min_ingress_nodes as f64,
+                );           
+             }
         }
-        Testing::MinStakeThreshold => {
+        Testing::PruneStakeThreshold => {
             let step_size: f64 = config.step_size.into();
             let initial_prune_stake_threshold = config.prune_stake_threshold;
 
@@ -699,7 +726,14 @@ fn main() {
                 config.prune_stake_threshold = prune_stake_threshold;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &datapoint_queue, i);
+                run_simulation(
+                    &config, 
+                    &matches, 
+                    &mut gossip_stats_collection, 
+                    &datapoint_queue, 
+                    i, 
+                    initial_prune_stake_threshold as f64,
+                );            
             }
         }
         Testing::OriginRank => {
@@ -714,7 +748,14 @@ fn main() {
                 config.origin_rank = origin_rank;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &datapoint_queue, i);
+                run_simulation(
+                    &config, 
+                    &matches, 
+                    &mut gossip_stats_collection, 
+                    &datapoint_queue, 
+                    i, 
+                    origin_rank as f64,
+                );            
             }
         }
         Testing::FailNodes => {
@@ -729,12 +770,26 @@ fn main() {
                 config.fraction_to_fail = fraction_to_fail;
         
                 // Run the experiment with the updated config
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &datapoint_queue, i);
+                run_simulation(
+                    &config, 
+                    &matches, 
+                    &mut gossip_stats_collection, 
+                    &datapoint_queue, 
+                    i, 
+                    initial_fraction_to_fail as f64,
+                );           
             }
         }
         Testing::NoTest => {
             for i in 0..config.num_simulations {
-                run_simulation(&config, &matches, &mut gossip_stats_collection, &datapoint_queue, i);
+                run_simulation(
+                    &config, 
+                    &matches, 
+                    &mut gossip_stats_collection, 
+                    &datapoint_queue, 
+                    i, 
+                    0 as f64,
+                );            
             }
         }
     }

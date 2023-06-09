@@ -394,6 +394,7 @@ impl InfluxDataPoint {
         node_count: usize,
         probability_of_rotation: f64,
         api: &str,
+        start_value: String,
         test_type: Testing,
     ) {
         let data_point = format!("simulation_config num_simulations={},\
@@ -403,6 +404,7 @@ impl InfluxDataPoint {
             node_count={},\
             probability_of_rotation={},\
             api=\"{}\",\
+            start_value=\"{}\",\
             test_type=\"{}\" ",
                 num_simulations,
                 gossip_iterations_per_simulation,
@@ -411,9 +413,10 @@ impl InfluxDataPoint {
                 node_count,
                 probability_of_rotation,
                 api,
+                start_value,
                 test_type
         );
-        info!("datapoint: {}", data_point);
+        debug!("create test type datapoint: {}", data_point);
         self.datapoint.push_str(data_point.as_str());
         self.append_timestamp();
     }
