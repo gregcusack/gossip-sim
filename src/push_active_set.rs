@@ -47,9 +47,7 @@ impl PushActiveSet {
         // compare that origin stake to our node's stake. Take whichever is smaller.
         let stake = stakes.get(pubkey).min(stakes.get(origin));
         // based on the stake above, get the PushActiveSetEntry at that bucket.
-        // 
         debug!("num nodes in pase: {} for node: {:?}", self.get_entry(stake).get_nodes(origin, |_| false).count(), pubkey);
-        // info!("Node calling get_nodes(): {:?}", pubkey);
         self.get_entry(stake).get_nodes(origin, should_force_push)
     }
 
@@ -82,8 +80,6 @@ impl PushActiveSet {
         stakes: &HashMap<Pubkey, u64>,
         self_pubkey: Pubkey,
     ) {
-        // let j: &PushActiveSetEntry = &self.0[0];
-        // info!("greg pk: {:?}, PAS[0].len pre: {}", self_pubkey, j.0.len()); // all 0 at this point
         let num_bloom_filter_items = cluster_size.max(Self::MIN_NUM_BLOOM_ITEMS);
         // Active set of nodes to push to are sampled from these gossip nodes,
         // using sampling probabilities obtained from the stake bucket of each
@@ -97,7 +93,6 @@ impl PushActiveSet {
         //     min stake of {this node, crds value owner}
         // is equal to `k`. The `entry` maintains set of gossip nodes to
         // actively push to for crds values belonging to this bucket.
-        let mut bucket_index: u64 = 0;
         for (k, entry) in self.0.iter_mut().enumerate() {
             let weights: Vec<u64> = buckets
                 .iter()
@@ -114,20 +109,12 @@ impl PushActiveSet {
                     bucket.saturating_add(1).saturating_pow(2)
                 })
                 .collect();
-            debug!("bucket index: {}", bucket_index);
-            bucket_index += 1;
             entry.rotate(rng, size, num_bloom_filter_items, nodes, &weights, self_pubkey);
         }
-        // for j in self.0.iter() {
-        //     info!("greg pk: {:?}, PAS[0].len post: {}", self_pubkey, j.0.len()); //all 12 at this point
-        // }
     }
 
     fn get_entry(&self, stake: Option<&u64>) -> &PushActiveSetEntry {
-        let bucket = get_stake_bucket(stake);
-        debug!("bucket index: {}", bucket);
-        &self.0[bucket]
-        // &self.0[get_stake_bucket(stake)]
+        &self.0[get_stake_bucket(stake)]
     }
 }
 
@@ -175,16 +162,12 @@ impl PushActiveSetEntry {
         debug_assert_eq!(nodes.len(), weights.len());
         debug_assert!(weights.iter().all(|&weight| weight != 0u64));
         let shuffle = WeightedShuffle::new("rotate-active-set", weights).shuffle(rng);
-        debug!("greg start rotate()");
-        // info!("greg pk: {:?} weights, nodes, SAFE.len, size length: {}, {}, {}, {}", self_pubkey, weights.len(), nodes.len(), self.0.len(), size);
         for node in shuffle.map(|k| &nodes[k]) {
             // We intend to discard the oldest/first entry in the index-map.
             if self.0.len() > size {
-                // info!("greg pk {} self.0.len > size, break!", self_pubkey);
                 break;
             }
             if self.0.contains_key(node) {
-                // info!("greg pk: {:?} self.0.contains node's pubkey. continue.", self_pubkey);
                 continue;
             }
             let bloom = AtomicBloom::from(Bloom::random(
@@ -196,9 +179,7 @@ impl PushActiveSetEntry {
             bloom.add(node);
             self.0.insert(*node, bloom);
         }
-        debug!("greg end rotate()");
         // Drop the oldest entry while preserving the ordering of others.
-        // info!("greg pk: {:?} out of loop, self.0.len() > size. remove nodes from SAFE. self.0.len(), size: {}, {}", self_pubkey, self.0.len(), size);
         while self.0.len() > size {
             self.0.shift_remove_index(0);
         }
