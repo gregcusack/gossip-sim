@@ -377,7 +377,7 @@ fn run_simulation(
             info!("MST ITERATION: {}", gossip_iteration);
             match datapoint_queue {
                 Some(dp_queue) => {
-                    let mut datapoint = InfluxDataPoint::default();
+                    let mut datapoint = InfluxDataPoint::new(simulation_iteration);
                     datapoint.create_config_point(
                         config.gossip_push_fanout,
                         config.gossip_active_set_size,
@@ -449,7 +449,7 @@ fn run_simulation(
 
             match datapoint_queue {
                 Some(dp_queue) => {
-                    let mut datapoint = InfluxDataPoint::default();
+                    let mut datapoint = InfluxDataPoint::new(simulation_iteration);
                     match cluster.relative_message_redundancy() {
                         Ok(result) => {
                             stats.insert_rmr(result);
@@ -480,7 +480,7 @@ fn run_simulation(
         
                     datapoint.create_iteration_point(
                         steady_state_iteration, 
-                        simulation_iteration
+                        simulation_iteration,
                     );
                     dp_queue.lock().unwrap().push_back(datapoint);
                 }
@@ -508,6 +508,12 @@ fn run_simulation(
                     0,
                     25
             );
+        } else if config.test_type == Testing::MinIngressNodes {
+            stats.build_aggregate_hops_stats_histogram(
+                50,
+                    0,
+                    25
+            );
         } else {
             stats.build_aggregate_hops_stats_histogram(30, 0, 15);
         }
@@ -517,7 +523,7 @@ fn run_simulation(
 
         match datapoint_queue {
             Some(dp_queue) => {
-                let mut datapoint = InfluxDataPoint::default();
+                let mut datapoint = InfluxDataPoint::new(simulation_iteration);
                 let data = stats.get_stranded_node_iteration_data();
                 datapoint.create_stranded_iteration_point(
                     data.0,

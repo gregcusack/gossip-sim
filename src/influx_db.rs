@@ -254,6 +254,7 @@ impl InfluxDB {
 pub struct InfluxDataPoint {
     datapoint: String,
     timestamp: String,
+    simulation_iteration: usize,
 }
 
 impl Default for InfluxDataPoint {
@@ -261,11 +262,22 @@ impl Default for InfluxDataPoint {
         InfluxDataPoint {
             datapoint: "".to_string(),
             timestamp: get_timestamp_now(),
+            simulation_iteration: 0,
         }
     }
 }
 
 impl InfluxDataPoint {
+    pub fn new(
+        simulation_iter: usize,
+    ) -> Self {
+        Self {
+            datapoint: "".to_string(),
+            timestamp: get_timestamp_now(),
+            simulation_iteration: simulation_iter,
+        }
+    }
+
     pub fn data(
         &self,
     ) -> String {
@@ -320,6 +332,14 @@ impl InfluxDataPoint {
         self.datapoint.push_str(self.timestamp.as_str());
     }
 
+    pub fn append_simulation_iteration(
+        &mut self,
+    ) {
+        self.datapoint.push_str(
+            format!("simulation_iter=\"{}\" ", self.simulation_iteration.to_string()).as_str()
+        );
+    }
+
     pub fn set_and_append_timestamp(
         &mut self,
     ) {
@@ -331,11 +351,13 @@ impl InfluxDataPoint {
         data: f64,
         stat_type: String,
     ) {
-        let data_point = format!("{} data={} ",
-            stat_type, 
-            data
-        );        
-        self.datapoint.push_str(data_point.as_str());
+        self.datapoint.push_str(
+            format!("{},simulation_iter={} data={} ", 
+                stat_type, 
+                self.simulation_iteration, 
+                data
+            ).as_str()
+        );
         self.append_timestamp();
     }
 
@@ -344,14 +366,15 @@ impl InfluxDataPoint {
         data: &HopsStat,
     ) {
 
-        let data_point = format!("{} mean={},median={},max={} ",
-            "hops_stat".to_string(), 
-            data.mean(),
-            data.median(),
-            data.max()
+        self.datapoint.push_str(
+            format!("{},simulation_iter={} mean={},median={},max={} ", 
+                "hops_stat".to_string(), 
+                self.simulation_iteration,
+                data.mean(),
+                data.median(),
+                data.max()
+            ).as_str()
         );
-
-        self.datapoint.push_str(data_point.as_str());
         self.append_timestamp();
     }
 
@@ -359,29 +382,32 @@ impl InfluxDataPoint {
         &mut self,
         data: &StrandedNodeStats,
     ) {
-        let data_point = format!("{} count={},mean={},median={},max={},min={} ",
-            "stranded_node_stats".to_string(),
-            data.count(),
-            data.mean(),
-            data.median(),
-            data.max(),
-            data.min(),
+        self.datapoint.push_str(
+            format!("{},simulation_iter={} count={},mean={},median={},max={},min={} ", 
+                "stranded_node_stats".to_string(), 
+                self.simulation_iteration,
+                data.count(),
+                data.mean(),
+                data.median(),
+                data.max(),
+                data.min()
+            ).as_str()
         );
-
-        self.datapoint.push_str(data_point.as_str());
         self.append_timestamp();
     }
 
     pub fn create_iteration_point(
         &mut self,
         gossip_iter: usize,
-        simulation_iter: usize,
+        simulation_iter_val: usize,
     ) {
-        let data_point = format!("iteration simulation_iter={},gossip_iter={} ", 
-            simulation_iter, 
-            gossip_iter
+        self.datapoint.push_str(
+            format!("iteration,simulation_iter={} gossip_iter={},simulation_iter_val={} ", 
+                self.simulation_iteration, 
+                gossip_iter,
+                simulation_iter_val
+            ).as_str()
         );
-        self.datapoint.push_str(data_point.as_str());
         self.append_timestamp();
     }
 
@@ -430,20 +456,23 @@ impl InfluxDataPoint {
         min_ingress_nodes: usize,
         fraction_to_fail: f64,
     ) {
-        let data_point = format!("config push_fanout={},\
-            active_set_size={},\
-            origin_rank={},\
-            prune_stake_threshold={},\
-            min_ingress_nodes={},\
-            fraction_to_fail={} ",
-                push_fanout, 
-                active_set_size,
-                origin_rank,
-                prune_stake_threshold,
-                min_ingress_nodes,
-                fraction_to_fail,
+        self.datapoint.push_str(
+            format!("config,simulation_iter={} \
+                push_fanout={},\
+                active_set_size={},\
+                origin_rank={},\
+                prune_stake_threshold={},\
+                min_ingress_nodes={},\
+                fraction_to_fail={} ",
+                    self.simulation_iteration,
+                    push_fanout, 
+                    active_set_size,
+                    origin_rank,
+                    prune_stake_threshold,
+                    min_ingress_nodes,
+                    fraction_to_fail
+            ).as_str()
         );
-        self.datapoint.push_str(data_point.as_str());
         self.append_timestamp();
     }
 
@@ -457,22 +486,25 @@ impl InfluxDataPoint {
         mean_weighted_stake: f64,
         median_weighted_stake: f64,
     ) {
-        let data_point = format!("stranded_node_iterations total_stranded={},\
-            mean_iter_stranded_per_node={},\
-            mean_stranded_per_iter={},\
-            mean_iter_stranded={},\
-            median_iter_stranded={},\
-            mean_weighted_stake={},\
-            median_weighted_stake={} ", 
-            total_stranded_iterations_count,
-            mean_number_of_iterations_node_stranded_for,
-            mean_number_of_nodes_stranded_during_each_iteration,
-            mean_number_of_iterations_a_stranded_node_was_stranded_for,
-            median_number_of_iterations_a_stranded_node_was_stranded_for,
-            mean_weighted_stake,
-            median_weighted_stake,
-            );
-        self.datapoint.push_str(data_point.as_str());
+        self.datapoint.push_str(
+            format!("stranded_node_iterations,simulation_iter={} \
+                total_stranded={},\
+                mean_iter_stranded_per_node={},\
+                mean_stranded_per_iter={},\
+                mean_iter_stranded={},\
+                median_iter_stranded={},\
+                mean_weighted_stake={},\
+                median_weighted_stake={} ", 
+                self.simulation_iteration,
+                total_stranded_iterations_count,
+                mean_number_of_iterations_node_stranded_for,
+                mean_number_of_nodes_stranded_during_each_iteration,
+                mean_number_of_iterations_a_stranded_node_was_stranded_for,
+                median_number_of_iterations_a_stranded_node_was_stranded_for,
+                mean_weighted_stake,
+                median_weighted_stake
+            ).as_str()
+        );
         self.append_timestamp();
     }
 
