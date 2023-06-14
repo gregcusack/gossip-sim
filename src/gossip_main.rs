@@ -158,6 +158,7 @@ fn parse_matches() -> ArgMatches {
                     min-ingress-nodes
                     prune-stake-threshold
                     origin-rank
+                    rotate-probability
                     fail-nodes
                     [default: no-test]
                 "),
@@ -385,6 +386,7 @@ fn run_simulation(
                         config.prune_stake_threshold,
                         config.min_ingress_nodes,
                         config.fraction_to_fail,
+                        config.probability_of_rotation,
                     );
                     dp_queue.lock().unwrap().push_back(datapoint);
                 }
@@ -685,6 +687,10 @@ fn main() {
                 // Update the active_set_size in the config for each experiment
                 let mut config = config.clone();
                 config.gossip_push_fanout = push_fanout;
+                // need to increase active_set_size or else push_fanout test > 12 active_set_size won't be accurate.
+                if push_fanout > config.gossip_active_set_size {
+                    config.gossip_active_set_size = push_fanout;
+                }
         
                 // Run the experiment with the updated config
                 run_simulation(
@@ -783,6 +789,28 @@ fn main() {
                     &datapoint_queue, 
                     i, 
                     initial_fraction_to_fail as f64,
+                );           
+            }
+        }
+        Testing::RotateProbability => {
+            let step_size: f64 = config.step_size.into();
+            let intial_rotate_probability = config.probability_of_rotation;
+
+            for i in 0..config.num_simulations {
+                let rotate_probability = intial_rotate_probability + (i as f64 * step_size);
+
+                // Update the active_set_size in the config for each experiment
+                let mut config = config.clone();
+                config.probability_of_rotation = rotate_probability;
+        
+                // Run the experiment with the updated config
+                run_simulation(
+                    &config, 
+                    &matches, 
+                    &mut gossip_stats_collection, 
+                    &datapoint_queue, 
+                    i, 
+                    intial_rotate_probability as f64,
                 );           
             }
         }

@@ -37,6 +37,7 @@ pub enum Testing {
     PruneStakeThreshold,
     OriginRank,
     FailNodes,
+    RotateProbability,
     NoTest,
 }
 
@@ -49,6 +50,7 @@ impl std::fmt::Display for Testing {
             Testing::PruneStakeThreshold => write!(f, "PruneStakeThreshold"),
             Testing::OriginRank => write!(f, "OriginRank"),
             Testing::FailNodes => write!(f, "FailNodes"),
+            Testing::RotateProbability => write!(f, "RotateProbability"),
             Testing::NoTest => write!(f, "NoTest"),
         }
     }
@@ -65,6 +67,7 @@ impl FromStr for Testing {
             "prune-stake-threshold" => Ok(Testing::PruneStakeThreshold),
             "origin-rank" => Ok(Testing::OriginRank),
             "fail-nodes" => Ok(Testing::FailNodes),
+            "rotate-probability" => Ok(Testing::RotateProbability),
             "no-test" => Ok(Testing::NoTest),
             _ => Err(format!("Invalid test type: {}", s)),
         }
