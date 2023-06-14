@@ -455,6 +455,7 @@ impl InfluxDataPoint {
         prune_stake_threshold: f64,
         min_ingress_nodes: usize,
         fraction_to_fail: f64,
+        rotation_probability: f64,
     ) {
         self.datapoint.push_str(
             format!("config,simulation_iter={} \
@@ -463,14 +464,16 @@ impl InfluxDataPoint {
                 origin_rank={},\
                 prune_stake_threshold={},\
                 min_ingress_nodes={},\
-                fraction_to_fail={} ",
+                fraction_to_fail={},\
+                rotation_probability={} ",
                     self.simulation_iteration,
                     push_fanout, 
                     active_set_size,
                     origin_rank,
                     prune_stake_threshold,
                     min_ingress_nodes,
-                    fraction_to_fail
+                    fraction_to_fail,
+                    rotation_probability,
             ).as_str()
         );
         self.append_timestamp();
