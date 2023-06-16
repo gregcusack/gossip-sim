@@ -454,10 +454,9 @@ fn run_simulation(
                     let mut datapoint = InfluxDataPoint::new(simulation_iteration);
                     match cluster.relative_message_redundancy() {
                         Ok(result) => {
-                            stats.insert_rmr(result);
-                            datapoint.create_data_point(
-                                result, 
-                                "rmr".to_string()
+                            stats.insert_rmr(result.0);
+                            datapoint.create_rmr_data_point(
+                                result
                             );
                         },
                         Err(_) => error!("Network RMR error. # of nodes is 1."),
@@ -489,7 +488,7 @@ fn run_simulation(
                 None => {
                     match cluster.relative_message_redundancy() {
                         Ok(result) => {
-                            stats.insert_rmr(result);
+                            stats.insert_rmr(result.0);
                         },
                         Err(_) => error!("Network RMR error. # of nodes is 1."),
                     }

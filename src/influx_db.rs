@@ -346,6 +346,21 @@ impl InfluxDataPoint {
         self.datapoint.push_str(self.get_timestamp_now().as_str());
     }
 
+    pub fn create_rmr_data_point(
+        &mut self,
+        (rmr, total_messages, total_nodes_rx_message): (f64, u64, u64),
+    ) {
+        self.datapoint.push_str(
+            format!("rmr,simulation_iter={} rmr={},m={},n={} ", 
+                self.simulation_iteration, 
+                rmr,
+                total_messages,
+                total_nodes_rx_message
+            ).as_str()
+        );
+        self.append_timestamp();
+    }
+
     pub fn create_data_point(
         &mut self,
         data: f64,

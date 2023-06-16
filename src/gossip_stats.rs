@@ -394,13 +394,13 @@ impl RelativeMessageRedundancy {
 
     pub fn calculate_rmr(
         &mut self,
-    ) -> Result<f64, String> {
+    ) -> Result<(f64, u64, u64), String> {
         if self.n == 0 {
             Err("Division by zero. n is 0.".to_string())
         } else {
             self.rmr = self.m as f64 / (self.n - 1) as f64 - 1.0;
             trace!("RMR: {}, m: {}, n: {}", self.rmr, self.m, self.n);
-            Ok(self.rmr)
+            Ok((self.rmr, self.m, self.n))
         }
     }
 
@@ -408,6 +408,18 @@ impl RelativeMessageRedundancy {
         &self,
     ) -> f64 {
         self.rmr
+    }
+
+    pub fn total_messages_sent(
+        &self,
+    ) -> u64 {
+        self.m
+    }
+
+    pub fn total_nodes_that_received_message(
+        &self,
+    ) -> u64 {
+        self.n
     }
 
 }
@@ -1801,7 +1813,7 @@ mod tests {
 
             match cluster.relative_message_redundancy() {
                 Ok(result) => {
-                    gossip_stats.insert_rmr(result);
+                    gossip_stats.insert_rmr(result.0);
                 },
                 Err(_) => error!("Network RMR error. # of nodes is 1."),
             }

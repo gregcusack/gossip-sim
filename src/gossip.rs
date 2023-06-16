@@ -416,11 +416,11 @@ impl Cluster {
     // if calculated return it. 
     pub fn relative_message_redundancy(
         &mut self,
-    ) -> Result<f64, String> {
+    ) -> Result<(f64, u64, u64), String> {
         if self.rmr.rmr() == 0.0 {
             self.rmr.calculate_rmr()
         } else {
-            Ok(self.rmr.rmr())
+            Ok((self.rmr.rmr(), self.rmr.total_messages_sent(), self.rmr.total_nodes_that_received_message()))
         }
     }
 
