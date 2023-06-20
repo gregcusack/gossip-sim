@@ -1,3 +1,5 @@
+use crate::gossip_stats::EgressMessages;
+
 use {
     crate::{push_active_set::PushActiveSet, received_cache::ReceivedCache, Error, gossip_stats},
     crossbeam_channel::{Receiver, Sender},
@@ -174,6 +176,13 @@ pub struct Cluster {
     // count total prunes per iteration. 
     // will help determine steady state and required warmup rounds
     total_prunes: usize,
+
+    // count the total number of messages a node is pushing to
+    // NOTE: we want to use this with stakes to see how egress amounts
+    // vary with stake size. Also if we increase push_fanout, does that
+    // increase egress count a ton?
+    // egress_message_count: HashMap<Pubkey, usize>,
+    egress_message_count: gossip_stats::EgressMessages,
 }
 
 impl Cluster {
@@ -193,6 +202,7 @@ impl Cluster {
             rmr: gossip_stats::RelativeMessageRedundancy::default(),
             failed_nodes: HashSet::new(),
             total_prunes: 0,
+            egress_message_count: EgressMessages::default(),
         }
     }
 
@@ -208,6 +218,7 @@ impl Cluster {
         self.pushes.clear();
         self.rmr.reset();
         self.total_prunes = 0;
+        self.egress_message_count.clear();
     }
 
     pub fn get_outbound_degree(
@@ -492,6 +503,9 @@ impl Cluster {
             // insert current node into pushes map
             self.pushes.insert(current_node_pubkey, HashSet::new());
 
+            // insert current node into egress_message_count
+            self.egress_message_count.add_node(&current_node_pubkey);
+
             // For each peer of the current node's PASE (limit PUSH_FANOUT), 
             // update its distance and add it to the queue if it has not been visited
             let mut pase_counter: usize = 0;
@@ -521,6 +535,9 @@ impl Cluster {
                         .get_mut(&current_node_pubkey)
                         .unwrap()
                         .insert(*neighbor);
+
+                    // add one to current_node egress_message_count
+                    self.egress_message_count.increment(&current_node_pubkey);
 
                     // Ensure the neighbor hasn't pruned us!
                     match self.prune_exists(neighbor, &current_node_pubkey) {

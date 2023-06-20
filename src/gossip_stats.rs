@@ -1,3 +1,5 @@
+use solana_sdk::pubkey;
+
 use {
     crate::{
         Stats, 
@@ -206,7 +208,6 @@ impl HopsStatCollection {
         &self.last_delivery_hop_stats
     }
 
-    //TODO: turn this into its own object that is held by the stranded stats collection
     pub fn build_histogram(
         &mut self,
         upper_bound: u64,
@@ -342,6 +343,72 @@ impl StatCollection {
         info!("{} {}", self.collection_type, self.max);
         info!("{} {}", self.collection_type, self.min);
     }    
+}
+
+// WRT EgressMessages. Do not use our histogram class. doesn't quite work. see below
+// stakes are the buckets. lower bound 0, upper bound is max stake. 
+// number of buckets...need to figure out. But this should be pretty static
+// entries need to be a vector
+
+// i actually don't think we can use our histogram class.
+// in our histogram class, we calculate bucket, but we know our bucket range?
+// need to think about this
+
+// buckets should be top 5%, 6-10%, 11-15%, of stake
+// and then height in bucket can be
+//      1. total egress messages summed across all nodes in each bucket
+//      2. mean egress messages across all nodes in each bucket
+// think (1) is the best place to start.
+
+// generate buckets from stake distribution.
+// figure out which nodes fall into which buckets and sum those node's egress counts
+// pass these buckets/counts as two different metrics to influx. 
+// grafana can then bar chart them
+#[derive(Debug, Clone)]
+pub struct EgressMessages {
+    counts: HashMap<Pubkey, usize>,
+    histogram: Histogram,  // i actually don't think we can use our histogram class.
+}
+
+impl Default for EgressMessages {
+    fn default() -> Self {
+        Self {
+            counts: HashMap::default(),
+            histogram: Histogram::default(),
+        }
+    }
+}
+
+impl EgressMessages {
+    pub fn add_node(
+        &mut self,
+        pubkey: &Pubkey,
+    ) {
+        self.counts.insert(*pubkey, 0);
+    }
+
+    pub fn increment(
+        &mut self,
+        pubkey: &Pubkey,
+    ) {
+        *self.counts
+            .get_mut(pubkey)
+            .unwrap() += 1;
+    }
+
+    pub fn clear(
+        &mut self,
+    ) {
+        self.counts.clear();
+    }
+
+    //
+    pub fn build_histogram(
+        &mut self,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        // build our "histogram"-like object here. see note at top of class definition
+    }
 }
 
 // RMR = m / (n - 1) - 1
