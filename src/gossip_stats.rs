@@ -405,8 +405,9 @@ impl EgressMessages {
         }
 
         let upper_bound = stakes_vec[0].1; // highest stake
-        let lower_bound = stakes_vec[stakes_vec.len() - 1].1; //lowest stake
-        let num_buckets = 100;
+        // let lower_bound = stakes_vec[stakes_vec.len() - 1].1; //lowest stake
+        let lower_bound = 0;
+        let num_buckets = 100; // TODO: make configurable
         let bucket_range: u64;
 
         if upper_bound == lower_bound || lower_bound + 1 == upper_bound {
