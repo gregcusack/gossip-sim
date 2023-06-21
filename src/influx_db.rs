@@ -7,6 +7,7 @@ use {
         HopsStat,
         StrandedNodeStats,
         Histogram,
+        EgressMessages,
     },
     crate::gossip::{
         Testing,
@@ -546,6 +547,29 @@ impl InfluxDataPoint {
         }
 
         debug!("histogram point: {}", self.datapoint);
+    }
+
+    // this is really a histogram. needs refactor
+    pub fn create_egress_messages_point(
+        &mut self,
+        egress_messages: &EgressMessages,
+        simulation_iter_val: usize,
+    ) {
+        for (bucket, egress_count) in egress_messages.entries().iter() {
+            let bucket_min = egress_messages.min_entry() + bucket * egress_messages.bucket_range();
+            let bucket_max = egress_messages.min_entry() + (bucket + 1) * egress_messages.bucket_range() - 1;
+            if bucket_min == bucket_max {
+                debug!("Bucket: {}: Message Count: {}", bucket_max, egress_count);
+            } else {
+                debug!("Bucket: {}-{}: Message Count: {}", bucket_min, bucket_max, egress_count);
+            }
+            let data_point  = format!("egress_message_count,simulation_iter={} bucket={},count={} ", simulation_iter_val, bucket_max, egress_count);
+
+            self.datapoint.push_str(data_point.as_str());
+            self.set_and_append_timestamp();
+        }
+
+        info!("egress histogram point: {}", self.datapoint);
     }
 
 

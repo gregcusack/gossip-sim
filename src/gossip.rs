@@ -15,8 +15,6 @@ use {
         sync::Arc,
         time::{Instant},
         str::FromStr,
-        fs::File,
-        io::{BufWriter, Write},
         iter::repeat,
     },
     rand::{
@@ -188,7 +186,8 @@ pub struct Cluster {
 impl Cluster {
 
     pub fn new(
-        push_fanout: usize
+        push_fanout: usize,
+        stakes: &HashMap<Pubkey, u64>,
     ) -> Self {
         Cluster { 
             gossip_push_fanout: push_fanout,
@@ -202,7 +201,7 @@ impl Cluster {
             rmr: gossip_stats::RelativeMessageRedundancy::default(),
             failed_nodes: HashSet::new(),
             total_prunes: 0,
-            egress_message_count: EgressMessages::default(),
+            egress_message_count: EgressMessages::new(stakes),
         }
     }
 
@@ -218,7 +217,6 @@ impl Cluster {
         self.pushes.clear();
         self.rmr.reset();
         self.total_prunes = 0;
-        self.egress_message_count.clear();
     }
 
     pub fn get_outbound_degree(
@@ -441,27 +439,10 @@ impl Cluster {
         &self.rmr
     }
 
-    pub fn write_adjacency_list_to_file(
-        &self,
-        filename: &str,
-    ) -> std::io::Result<()> {
-        let file = File::create(filename)?;
-        let mut writer = BufWriter::new(file);
-
-        for (src_node, dst_nodes) in self.mst.iter() {
-            // Write the source node
-            write!(writer, "{:-4}:", src_node)?;
-            
-            // Write the destination nodes
-            for dst_node in dst_nodes {
-                write!(writer, " {:-4}", dst_node)?;
-            }
-
-            // End the line
-            writeln!(writer)?;
-        }
-
-        Ok(())
+    pub fn get_egress_messages(
+        &mut self,
+    ) -> &mut gossip_stats::EgressMessages {
+        &mut self.egress_message_count
     }
 
     fn initialize(
@@ -502,9 +483,6 @@ impl Cluster {
 
             // insert current node into pushes map
             self.pushes.insert(current_node_pubkey, HashSet::new());
-
-            // insert current node into egress_message_count
-            self.egress_message_count.add_node(&current_node_pubkey);
 
             // For each peer of the current node's PASE (limit PUSH_FANOUT), 
             // update its distance and add it to the queue if it has not been visited
@@ -1041,7 +1019,7 @@ mod tests {
             .map(|node| (node.pubkey(), node))
             .collect();
 
-        let mut cluster: Cluster = Cluster::new(PUSH_FANOUT);
+        let mut cluster: Cluster = Cluster::new(PUSH_FANOUT, &stakes);
         let origin_pubkey = &pubkey; //just a temp origin selection
         cluster.run_gossip(origin_pubkey, &stakes, &node_map);
 

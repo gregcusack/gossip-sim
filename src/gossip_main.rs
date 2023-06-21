@@ -351,7 +351,7 @@ fn run_simulation(
     let _res = initialize_gossip(&mut nodes, &stakes, config.gossip_active_set_size).unwrap();
     info!("Simulation Complete!");
 
-    let mut cluster: Cluster = Cluster::new(config.gossip_push_fanout);
+    let mut cluster: Cluster = Cluster::new(config.gossip_push_fanout, &stakes);
 
     let origin_node = find_nth_largest_node(config.origin_rank, &nodes).unwrap();
     let origin_pubkey = &origin_node.pubkey();
@@ -522,6 +522,17 @@ fn run_simulation(
         stats.run_all_calculations();
         gossip_stats_collection.push(stats.clone());
 
+        // TODO: refactor this into "stats" struct. kinda a cluster fuck
+        // should be: stat.get_egress_messages_histogram(stakes) or something
+        cluster
+            .get_egress_messages()
+            .build_histogram(&stakes);
+
+        // TODO: refactor. should be in "stats". should only be printed if --print-stats set
+        cluster
+            .get_egress_messages()
+            .print_histogram();
+
         match datapoint_queue {
             Some(dp_queue) => {
                 let mut datapoint = InfluxDataPoint::new(simulation_iteration);
@@ -544,6 +555,12 @@ fn run_simulation(
                 datapoint.create_histogram_point(
                     "aggregate_hops_histogram".to_string(),
                     stats.get_aggregate_hop_stat_histogram()
+                );
+
+                // TODO: refactor. should be stat.get_egress_messages();
+                datapoint.create_egress_messages_point(
+                    cluster.get_egress_messages(),
+                    simulation_iteration
                 );
 
                 datapoint.create_iteration_point(0, simulation_iteration);
@@ -978,7 +995,7 @@ mod tests {
         // setup gossip
         run_gossip(&mut rng, &mut nodes, &stakes, ACTIVE_SET_SIZE);
 
-        let mut cluster: Cluster = Cluster::new(PUSH_FANOUT);
+        let mut cluster: Cluster = Cluster::new(PUSH_FANOUT, &stakes);
         let origin_pubkey = &pubkey; //just a temp origin selection
 
         // verify buckets

@@ -1,5 +1,3 @@
-use solana_sdk::pubkey;
-
 use {
     crate::{
         Stats, 
@@ -366,25 +364,68 @@ impl StatCollection {
 // grafana can then bar chart them
 #[derive(Debug, Clone)]
 pub struct EgressMessages {
-    counts: HashMap<Pubkey, usize>,
-    histogram: Histogram,  // i actually don't think we can use our histogram class.
+    counts: HashMap<Pubkey, u64>,
+    max_entry: u64,
+    min_entry: u64,
+    num_buckets: u64,
+    bucket_range: u64,
+    entries: BTreeMap<u64, u64>,
+    // histogram: Histogram,  // i actually don't think we can use our histogram class.
 }
 
-impl Default for EgressMessages {
-    fn default() -> Self {
-        Self {
-            counts: HashMap::default(),
-            histogram: Histogram::default(),
-        }
-    }
-}
+// impl Default for EgressMessages {
+//     fn default() -> Self {
+//         Self {
+//             counts: HashMap::default(),
+//             histogram: Histogram::default(),
+//         }
+//     }
+// }
 
 impl EgressMessages {
-    pub fn add_node(
-        &mut self,
-        pubkey: &Pubkey,
-    ) {
-        self.counts.insert(*pubkey, 0);
+    pub fn new(
+        stakes: &HashMap<Pubkey, u64>,
+    ) -> Self {
+
+        let mut stakes_vec: Vec<(Pubkey, u64)> = stakes
+            .clone()
+            .into_iter()
+            .collect();
+
+        // sort by stake largest to smallest
+        stakes_vec.sort_by(|(_, stake1), (_, stake2)| {
+            stake1.cmp(stake2).reverse()
+        });
+
+        // initialize entire counts map. want to include all nodes
+        // when we build our histogram
+        let mut counts: HashMap<Pubkey, u64> = HashMap::default();
+        for (pubkey, _) in stakes_vec.iter() {
+            counts.insert(*pubkey, 0);
+        }
+
+        let upper_bound = stakes_vec[0].1; // highest stake
+        let lower_bound = stakes_vec[stakes_vec.len() - 1].1; //lowest stake
+        let num_buckets = 100;
+        let bucket_range: u64;
+
+        if upper_bound == lower_bound || lower_bound + 1 == upper_bound {
+            warn!("WARNING: Max and Min EngressMessage histogram entries are the same or off by 1.");
+            bucket_range = 1;
+        } else {
+            bucket_range = (upper_bound - lower_bound) / num_buckets;
+        }
+
+        debug!("EgressMessage Histogram: upper, lower, buckets, range: {}, {}, {}, {}", upper_bound, lower_bound, num_buckets, bucket_range);
+
+        Self {
+            counts,
+            max_entry: upper_bound,
+            min_entry: lower_bound,
+            num_buckets,
+            bucket_range,
+            entries: BTreeMap::default(),
+        }
     }
 
     pub fn increment(
@@ -396,19 +437,82 @@ impl EgressMessages {
             .unwrap() += 1;
     }
 
-    pub fn clear(
-        &mut self,
-    ) {
-        self.counts.clear();
-    }
-
-    //
+    // put together our histogram
+    // buckets correspond to percentage of stake
+    // so first bucket corresponds to the top 1% of stake if we have 100 buckets
+    // or the top 5% of stake if we have 20 buckets.
     pub fn build_histogram(
         &mut self,
         stakes: &HashMap<Pubkey, u64>,
     ) {
         // build our "histogram"-like object here. see note at top of class definition
+        self.entries.clear();
+        for bucket in 0..self.num_buckets {
+            self.entries.insert(bucket, 0);
+        }
+
+        for (pubkey, egress_messages) in self.counts.iter() {
+            let stake = stakes
+                .get(pubkey)
+                .unwrap();
+
+            if *stake >= self.min_entry && *stake <= self.max_entry {
+                let bucket = (*stake - self.min_entry) / self.bucket_range;
+
+                // add total egress messages to bucket entry.
+                // if bucket entry doesn't exist, begin it with the current egress_messages count
+                *self.entries.entry(bucket).or_insert(*egress_messages) += *egress_messages;
+            } else {
+                error!("ERROR. EgressMessages Histogram: Entry > max_entry or < min_entry. entry: {}, max_entry: {}, min_entry: {}", stake, self.max_entry, self.min_entry);
+            }
+
+        }
     }
+
+    pub fn entries(
+        &self,
+    ) -> &BTreeMap<u64, u64> {
+        &self.entries
+    }
+
+    pub fn min_entry(
+        &self,
+    ) -> u64 {
+        self.min_entry
+    }
+
+    pub fn max_entry(
+        &self,
+    ) -> u64 {
+        self.max_entry
+    }
+
+    pub fn bucket_range(
+        &self,
+    ) -> u64 {
+        self.bucket_range
+    }
+
+    // TODO: Refactor and put in GossipStats
+    pub fn print_histogram(
+        &self,
+    ) {
+        info!("|------------------------------------------------|");
+        info!("|---- EGRESS MESSAGE HISTOGRAM W/ {} BUCKETS ----|", self.num_buckets);
+        info!("|------------------------------------------------|"); 
+        // Print the histogram sorted by bucket index
+        info!("EgressMessage Histogram: upper, lower, buckets, range: {}, {}, {}, {}", self.max_entry, self.min_entry, self.num_buckets, self.bucket_range);
+        for (bucket_number, (bucket, count)) in self.entries.iter().enumerate() {
+            let bucket_min = self.min_entry() + bucket * self.bucket_range();
+            let bucket_max = self.min_entry() + (bucket + 1) * self.bucket_range() - 1;
+            if bucket_min == bucket_max {
+                info!("Bucket {}: {}: Count: {}", bucket_number, bucket_max, count);
+            } else {
+                info!("Bucket {}: {}-{}: Count: {}", bucket_number, bucket_min, bucket_max, count);
+            }
+        }
+    }
+
 }
 
 // RMR = m / (n - 1) - 1
@@ -541,7 +645,7 @@ impl Histogram {
             self.bucket_range = (upper_bound - lower_bound) / num_buckets;
         }
 
-        debug!("histogram_v2: upper, lower, buckets, range: {}, {}, {}, {}", upper_bound, lower_bound, num_buckets, self.bucket_range);
+        debug!("histogram: upper, lower, buckets, range: {}, {}, {}, {}", upper_bound, lower_bound, num_buckets, self.bucket_range);
 
         // Initialize all buckets with 0 entries
         self.entries.clear();
@@ -1129,6 +1233,7 @@ impl Default for GossipStats {
             origin: Pubkey::default(),
             simulation_parameters: SimulationParamaters::default(),
             failed_nodes: HashSet::default(),
+
         }
     }
 }
@@ -1848,7 +1953,7 @@ mod tests {
             println!("{:?}, {}", key, stake);
         }
         let mut gossip_stats = GossipStats::default();
-        let mut cluster = Cluster::new(PUSH_FANOUT);
+        let mut cluster = Cluster::new(PUSH_FANOUT, &stakes);
         let origin_pubkey = &pubkey; //just a temp origin selection
 
 
