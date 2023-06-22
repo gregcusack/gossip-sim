@@ -534,6 +534,14 @@ impl Cluster {
                 )
                 .take(self.gossip_push_fanout)
                 .enumerate() {
+
+                    let chance_to_fail = 0.1;
+                    let mut chance_rng = StdRng::from_entropy();
+                    if chance_rng.gen::<f64>() < chance_to_fail {
+                        info!("Failing node: {:?}", neighbor);
+                        continue;
+                    }
+
                     // check if node has failed. if it is, we do process this neighbor node.
                     if node_map.get(neighbor).unwrap().failed() {
                         trace!("NODE FAILED: {:?}", neighbor);
