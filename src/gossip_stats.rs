@@ -66,9 +66,12 @@ impl HopsStat {
             .sum::<u64>() as f64 / count as f64;
 
         // Calculate the median
-        let median = if count % 2 == 0 {
+        let median = if count == 0 {
+            0.0
+        } else if count == 1 {
+            hops[0] as f64
+        } else if count % 2 == 0 {
             let mid = count / 2;
-
             (hops[mid - 1] + hops[mid]) as f64 / 2.0
         } else {
             hops[count / 2] as f64
