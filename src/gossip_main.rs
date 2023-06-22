@@ -351,17 +351,22 @@ fn run_simulation(
     let _res = initialize_gossip(&mut nodes, &stakes, config.gossip_active_set_size).unwrap();
     info!("Simulation Complete!");
 
-    let mut cluster: Cluster = Cluster::new(config.gossip_push_fanout, &stakes);
-
     let origin_node = find_nth_largest_node(config.origin_rank, &nodes).unwrap();
     let origin_pubkey = &origin_node.pubkey();
+
+    let mut stats = GossipStats::default();
+    stats.set_simulation_parameters(config);
+    stats.set_origin(*origin_pubkey);
+    stats.initialize_egress_message_stats(&stakes);
+
+    let mut cluster: Cluster = Cluster::new_with_stats(
+        config.gossip_push_fanout,
+        &stakes,
+    );
 
     info!("ORIGIN: {:?}", origin_pubkey);
     let mut _number_of_poor_coverage_runs: usize = 0;
     let poor_coverage_threshold: f64 = 0.95;
-    let mut stats = GossipStats::default();
-    stats.set_simulation_parameters(config);
-    stats.set_origin(*origin_pubkey);
 
     match datapoint_queue {
         Some(dp_queue) => {
@@ -420,9 +425,9 @@ fn run_simulation(
 
         cluster.chance_to_rotate(&mut nodes, config.gossip_active_set_size, &stakes, config.probability_of_rotation);
 
-        if gossip_iteration + 1 == config.warm_up_rounds {
-            cluster.get_egress_messages().clear();
-        }
+        // if gossip_iteration + 1 == config.warm_up_rounds {
+        //     stats.clear_egress_message_count();
+        // }
 
         // wait until after warmup rounds to begin calculating gossip stats and reporting to influx
         if gossip_iteration >= config.warm_up_rounds {
@@ -451,6 +456,10 @@ fn run_simulation(
             }
 
             stats.calculate_outbound_branching_factor(cluster.get_pushes());
+
+            stats.update_egress_message_counts(
+                cluster.get_egress_messages()
+            );
 
             match datapoint_queue {
                 Some(dp_queue) => {
@@ -522,19 +531,11 @@ fn run_simulation(
             stats.build_aggregate_hops_stats_histogram(30, 0, 15);
         }
 
+        stats.build_egress_message_histogram(100, true, &stakes);
+        // stats.print_egress_message_histogram();
+
         stats.run_all_calculations();
         gossip_stats_collection.push(stats.clone());
-
-        // TODO: refactor this into "stats" struct. kinda a cluster fuck
-        // should be: stat.get_egress_messages_histogram(stakes) or something
-        cluster
-            .get_egress_messages()
-            .build_histogram(&stakes);
-
-        // TODO: refactor. should be in "stats". should only be printed if --print-stats set
-        cluster
-            .get_egress_messages()
-            .print_histogram();
 
         match datapoint_queue {
             Some(dp_queue) => {
@@ -562,7 +563,7 @@ fn run_simulation(
 
                 // TODO: refactor. should be stat.get_egress_messages();
                 datapoint.create_egress_messages_point(
-                    cluster.get_egress_messages(),
+                    stats.get_egress_messages_histogram(),
                     simulation_iteration
                 );
 
@@ -998,7 +999,7 @@ mod tests {
         // setup gossip
         run_gossip(&mut rng, &mut nodes, &stakes, ACTIVE_SET_SIZE);
 
-        let mut cluster: Cluster = Cluster::new(PUSH_FANOUT, &stakes);
+        let mut cluster: Cluster = Cluster::new(PUSH_FANOUT);
         let origin_pubkey = &pubkey; //just a temp origin selection
 
         // verify buckets

@@ -343,16 +343,7 @@ impl StatCollection {
     }    
 }
 
-// WRT EgressMessages. Do not use our histogram class. doesn't quite work. see below
-// stakes are the buckets. lower bound 0, upper bound is max stake. 
-// number of buckets...need to figure out. But this should be pretty static
-// entries need to be a vector
-
-// i actually don't think we can use our histogram class.
-// in our histogram class, we calculate bucket, but we know our bucket range?
-// need to think about this
-
-// buckets should be top 5%, 6-10%, 11-15%, of stake
+// Histgoram buckets should be top 5%, 6-10%, 11-15%, of stake
 // and then height in bucket can be
 //      1. total egress messages summed across all nodes in each bucket
 //      2. mean egress messages across all nodes in each bucket
@@ -365,20 +356,47 @@ impl StatCollection {
 #[derive(Debug, Clone)]
 pub struct EgressMessages {
     counts: HashMap<Pubkey, u64>,
-    max_entry: u64,
-    min_entry: u64,
-    num_buckets: u64,
-    bucket_range: u64,
-    entries: BTreeMap<u64, u64>,
     count_per_bucket: Vec<u64>,
-    // histogram: Histogram,  // i actually don't think we can use our histogram class.
+    histogram: Histogram,
+}
+
+impl Default for EgressMessages {
+    fn default() -> Self {
+        Self {
+            counts: HashMap::default(),
+            count_per_bucket: Vec::new(),
+            histogram: Histogram::default(),
+        }
+    }
 }
 
 impl EgressMessages {
-    pub fn new(
+    // initialize entire counts map. want to include all nodes
+    // when we build our histogram
+    pub fn initialize_counts_map(
+        &mut self,
         stakes: &HashMap<Pubkey, u64>,
-    ) -> Self {
+    ) {
+        for (pubkey, _) in stakes.iter() {
+            self.counts.insert(*pubkey, 0);
+        }
+    }
 
+    pub fn update_message_counts(
+        &mut self,
+        new_messages: &HashMap<Pubkey, u64>,
+    ) {
+        for (pubkey, new_message_count) in new_messages.iter() {
+            let current_count = self.counts.get_mut(pubkey).unwrap();
+            *current_count += *new_message_count;
+        }
+    }
+
+    pub fn build_histogram(
+        &mut self,
+        num_buckets: u64,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
         let mut stakes_vec: Vec<(Pubkey, u64)> = stakes
             .clone()
             .into_iter()
@@ -389,39 +407,23 @@ impl EgressMessages {
             stake1.cmp(stake2).reverse()
         });
 
-        // initialize entire counts map. want to include all nodes
-        // when we build our histogram
-        let mut counts: HashMap<Pubkey, u64> = HashMap::default();
-        for (pubkey, _) in stakes_vec.iter() {
-            counts.insert(*pubkey, 0);
-        }
+        self.count_per_bucket = vec![0; num_buckets as usize];
 
-        let upper_bound = stakes_vec[0].1; // highest stake
-        // let upper_bound = stakes_vec[stakes_vec.len() - 1].1; // highest stake
+        self.histogram.build_from_map(
+            num_buckets, 
+            &self.counts,
+            &stakes_vec,
+            &mut self.count_per_bucket
+        )
+    }
 
-        // let lower_bound = stakes_vec[stakes_vec.len() - 1].1; //lowest stake
-        let lower_bound = 0;
-        let num_buckets = 20; // TODO: make configurable
-        let bucket_range: u64;
-
-        if upper_bound == lower_bound || lower_bound + 1 == upper_bound {
-            warn!("WARNING: Max and Min EngressMessage histogram entries are the same or off by 1.");
-            bucket_range = 1;
-        } else {
-            bucket_range = (upper_bound - lower_bound) / num_buckets;
-        }
-
-        debug!("EgressMessage Histogram: upper, lower, buckets, range: {}, {}, {}, {}", upper_bound, lower_bound, num_buckets, bucket_range);
-
-        Self {
-            counts,
-            max_entry: upper_bound,
-            min_entry: lower_bound,
-            num_buckets,
-            bucket_range,
-            entries: BTreeMap::default(),
-            count_per_bucket: vec![0; (num_buckets + 1) as usize],
-        }
+    pub fn normalize_egress_message_counts(
+        &mut self,
+    ) {
+        self.histogram
+            .normalize_histogram(
+                &self.count_per_bucket
+        );
     }
 
     pub fn increment(
@@ -433,84 +435,6 @@ impl EgressMessages {
             .unwrap() += 1;
     }
 
-    // put together our histogram
-    // buckets correspond to percentage of stake
-    // so first bucket corresponds to the top 1% of stake if we have 100 buckets
-    // or the top 5% of stake if we have 20 buckets.
-    pub fn build_histogram(
-        &mut self,
-        stakes: &HashMap<Pubkey, u64>,
-    ) {
-        // build our "histogram"-like object here. see note at top of class definition
-        self.entries.clear();
-        for bucket in 0..self.num_buckets {
-            self.entries.insert(bucket, 0);
-        }
-
-        let mut stakes_vec: Vec<(Pubkey, u64)> = stakes
-            .clone()
-            .into_iter()
-            .collect();
-
-        // sort by stake largest to smallest
-        stakes_vec.sort_by(|(_, stake1), (_, stake2)| {
-            stake1.cmp(stake2).reverse()
-        });
-
-        // for (pubkey, egress_messages) in self.counts.iter() {
-        for (pubkey, stake) in stakes_vec.iter() {
-            let egress_messages = self.counts.get(pubkey).unwrap();
-            // let stake = stakes
-            //     .get(pubkey)
-            //     .unwrap();
-
-            if *stake >= self.min_entry && *stake <= self.max_entry {
-                let bucket: u64 = (*stake - self.min_entry) / self.bucket_range;
-                // info!("pubkey, stake, bucket, msgs: {:?}, {}, {}, {}", pubkey, stake, bucket, egress_messages);
-                // add total egress messages to bucket entry.
-                // if bucket entry doesn't exist, begin it with the current egress_messages count
-                *self.entries.entry(bucket).or_insert(0) += *egress_messages;
-                self.count_per_bucket[bucket as usize] += 1;
-            } else {
-                error!("ERROR. EgressMessages Histogram: Entry > max_entry or < min_entry. entry: {}, max_entry: {}, min_entry: {}", stake, self.max_entry, self.min_entry);
-            }
-        }
-
-        // this divides the total messages sent in each bucket by the number of nodes in each bucket.
-        // mean messages sent per bucket.
-        for (bucket, count) in self.entries.iter_mut() {
-            let nodes_in_bucket = self.count_per_bucket[*bucket as usize];
-            if nodes_in_bucket != 0 {
-                *count = *count / nodes_in_bucket;
-            }
-            
-        }
-    }
-
-    pub fn entries(
-        &self,
-    ) -> &BTreeMap<u64, u64> {
-        &self.entries
-    }
-
-    pub fn min_entry(
-        &self,
-    ) -> u64 {
-        self.min_entry
-    }
-
-    pub fn max_entry(
-        &self,
-    ) -> u64 {
-        self.max_entry
-    }
-
-    pub fn bucket_range(
-        &self,
-    ) -> u64 {
-        self.bucket_range
-    }
-
     pub fn clear(
         &mut self,
     ) {
@@ -519,30 +443,17 @@ impl EgressMessages {
         }
     }
 
-    // TODO: Refactor and put in GossipStats
-    pub fn print_histogram(
+    pub fn get_histogram(
         &self,
-    ) {
-        info!("|------------------------------------------------|");
-        info!("|---- EGRESS MESSAGE HISTOGRAM W/ {} BUCKETS ----|", self.num_buckets);
-        info!("|------------------------------------------------|"); 
-        // Print the histogram sorted by bucket index
-        info!("EgressMessage Histogram: upper, lower, buckets, range: {}, {}, {}, {}", self.max_entry, self.min_entry, self.num_buckets, self.bucket_range);
-        for (bucket_number, (bucket, count)) in self.entries.iter().enumerate() {
-            let bucket_min = self.min_entry() + bucket * self.bucket_range();
-            let bucket_max = self.min_entry() + (bucket + 1) * self.bucket_range() - 1;
-            if bucket_min == bucket_max {
-                info!("Bucket {}: {}: Count: {}", bucket_number, bucket_max, count);
-            } else {
-                info!("Bucket {}: {}-{}: Count: {}", bucket_number, bucket_min, bucket_max, count);
-            }
-        }
-
-        for (index, count) in self.count_per_bucket.iter().enumerate() {
-            info!("bucket index, count: {}, {}", index, count);
-        }
+    ) -> &Histogram {
+        &self.histogram
     }
 
+    pub fn get_count_per_bucket(
+        &self,
+    ) -> &Vec<u64> {
+        &self.count_per_bucket
+    }
 }
 
 // RMR = m / (n - 1) - 1
@@ -698,6 +609,69 @@ impl Histogram {
         }
     }
 
+    pub fn build_from_map(
+        &mut self,
+        num_buckets: u64,
+        input_entries: &HashMap<Pubkey, u64>,
+        // stakes: &HashMap<Pubkey, u64>,
+        sorted_stakes: &Vec<(Pubkey, u64)>,
+        count_per_bucket: &mut Vec<u64>,
+    ) {
+        self.min_entry = 0;
+        self.max_entry = sorted_stakes[0].1;
+        self.num_buckets = num_buckets;
+
+        if self.max_entry == self.min_entry || self.max_entry + 1 == self.max_entry {
+            warn!("WARNING: Max and Min histogram entries are the same or off by 1.");
+            self.bucket_range = 1;
+        } else {
+            self.bucket_range = (self.max_entry - self.min_entry) / num_buckets;
+        }
+
+        debug!("histogram: upper, lower, buckets, range: {}, {}, {}, {}", self.max_entry, self.min_entry, num_buckets, self.bucket_range);
+
+        // Initialize all buckets with 0 entries
+        self.entries.clear();
+        for bucket in 0..self.num_buckets {
+            self.entries.insert(bucket, 0);
+        }
+
+        for (pubkey, stake) in sorted_stakes.iter() {
+            let egress_messages = input_entries.get(pubkey).unwrap();
+
+            if *stake >= self.min_entry && *stake <= self.max_entry {
+                let mut bucket: u64 = (*stake - self.min_entry) / self.bucket_range;
+                // info!("pubkey, stake, bucket, msgs: {:?}, {}, {}, {}", pubkey, stake, bucket, egress_messages);
+                if bucket == self.num_buckets {
+                    bucket = bucket - 1;
+                }
+                // add total egress messages to bucket entry.
+                // if bucket entry doesn't exist, begin it with the current egress_messages count
+                *self.entries.entry(bucket).or_insert(0) += *egress_messages;
+                count_per_bucket[bucket as usize] += 1;
+            } else {
+                error!("ERROR. EgressMessages Histogram: Entry > max_entry or < min_entry. entry: {}, max_entry: {}, min_entry: {}", stake, self.max_entry, self.min_entry);
+            }
+        }
+        
+    }
+
+    // pass in a vector where each index in vector corresponds to a bucket
+    // divide the count in the corresponding bucket by the value in the
+    // corresponding normalization index bucket
+    // e.g. divide egreee message counts by total nodes in each bucket
+    pub fn normalize_histogram(
+        &mut self,
+        normalization_vector: &Vec<u64>,
+    ) {
+        for (bucket, value) in self.entries.iter_mut() {
+            let nodes_in_bucket = normalization_vector[*bucket as usize];
+            if nodes_in_bucket != 0 {
+                *value = *value / nodes_in_bucket;
+            }
+        }
+    }
+
     pub fn set_min_entry(
         &mut self,
         val: u64,
@@ -755,6 +729,8 @@ impl Histogram {
     ) -> &BTreeMap<u64, u64> {
         &self.entries
     }
+
+
 }
 
 #[derive(Clone, Debug)]
@@ -1250,6 +1226,7 @@ pub struct GossipStats {
     origin: Pubkey,
     pub simulation_parameters: SimulationParamaters,
     failed_nodes: HashSet<Pubkey>,
+    egress_messages: EgressMessages,
 }
 
 impl Default for GossipStats {
@@ -1263,7 +1240,7 @@ impl Default for GossipStats {
             origin: Pubkey::default(),
             simulation_parameters: SimulationParamaters::default(),
             failed_nodes: HashSet::default(),
-
+            egress_messages: EgressMessages::default()
         }
     }
 }
@@ -1364,6 +1341,7 @@ impl GossipStats {
         info!("|------------------------------------------------|");
         info!("|---- {} HISTOGRAM W/ {} BUCKETS ----|", hist_type, histogram.num_buckets());
         info!("|------------------------------------------------|"); 
+        
         // Print the histogram sorted by bucket index
         for (bucket, count) in histogram.entries.iter() {
             let bucket_min = histogram.min_entry() + bucket * histogram.bucket_range();
@@ -1739,6 +1717,64 @@ impl GossipStats {
         }
     }
 
+    pub fn update_egress_message_counts(
+        &mut self,
+        new_messages: &HashMap<Pubkey, u64>,
+    ) {
+        self.egress_messages.update_message_counts(new_messages);
+    }
+
+    pub fn build_egress_message_histogram(
+        &mut self,
+        num_buckets: u64,
+        normalize_histogram: bool,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        self.egress_messages.build_histogram(num_buckets, stakes);
+        if normalize_histogram {
+            self.egress_messages.normalize_egress_message_counts();
+        }
+    }
+
+    pub fn initialize_egress_message_stats(
+        &mut self,
+        stakes: &HashMap<Pubkey, u64>
+    ) {
+        self.egress_messages.initialize_counts_map(&stakes);
+    }
+
+    pub fn get_egress_message_stats(
+        &mut self,
+    ) -> &mut EgressMessages {
+        &mut self.egress_messages
+    }
+
+    pub fn clear_egress_message_count(
+        &mut self,
+    ) {
+        self.egress_messages.clear();
+    }
+
+    pub fn get_egress_messages_histogram(
+        &self,
+    ) -> &Histogram {
+        self.egress_messages.get_histogram()
+    }
+
+    pub fn print_egress_message_histogram(
+        &self,
+    ) {
+        self.print_histogram(
+            "EGRESS MESSAGES".to_string(),
+            self.egress_messages.get_histogram()
+        );
+
+        info!("Bucket counts for Egress Messages");
+        for (index, count) in self.egress_messages.get_count_per_bucket().iter().enumerate() {
+            info!("bucket index, count: {}, {}", index, count);
+        }
+    }
+
     pub fn is_empty(
         &self,
     ) -> bool {
@@ -1770,6 +1806,7 @@ impl GossipStats {
         self.print_stranded();
         self.print_failed_nodes();
         self.print_branching_factor_stats();
+        self.print_egress_message_histogram();
     }
 }
 
@@ -1983,7 +2020,7 @@ mod tests {
             println!("{:?}, {}", key, stake);
         }
         let mut gossip_stats = GossipStats::default();
-        let mut cluster = Cluster::new(PUSH_FANOUT, &stakes);
+        let mut cluster = Cluster::new(PUSH_FANOUT);
         let origin_pubkey = &pubkey; //just a temp origin selection
 
 

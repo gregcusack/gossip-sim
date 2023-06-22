@@ -1,5 +1,3 @@
-use crate::gossip_stats::EgressMessages;
-
 use {
     crate::{push_active_set::PushActiveSet, received_cache::ReceivedCache, Error, gossip_stats},
     crossbeam_channel::{Receiver, Sender},
@@ -8,6 +6,9 @@ use {
     solana_client::{
         rpc_client::RpcClient, rpc_config::RpcGetVoteAccountsConfig,
         rpc_response::RpcVoteAccountStatus,
+    },
+    gossip_stats::{
+        RelativeMessageRedundancy
     },
     solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey},
     std::{
@@ -159,7 +160,7 @@ pub struct Cluster {
     // src_node => dst_nodes {A, B, C, ..., N}
     pushes: HashMap<Pubkey, HashSet<Pubkey>>,
 
-    rmr: gossip_stats::RelativeMessageRedundancy,
+    rmr: RelativeMessageRedundancy,
 
     // prunes_v2: self_pubkey => peer => vec<origin>
     // aka who (peer) sent us (self_pubkey) the extra message. and who (origin) created that extra messages
@@ -179,15 +180,13 @@ pub struct Cluster {
     // NOTE: we want to use this with stakes to see how egress amounts
     // vary with stake size. Also if we increase push_fanout, does that
     // increase egress count a ton?
-    // egress_message_count: HashMap<Pubkey, usize>,
-    egress_message_count: gossip_stats::EgressMessages,
+    egress_message_count: HashMap<Pubkey, u64>,
+    // egress_message_count: EgressMessages_v2,
 }
 
 impl Cluster {
-
     pub fn new(
         push_fanout: usize,
-        stakes: &HashMap<Pubkey, u64>,
     ) -> Self {
         Cluster { 
             gossip_push_fanout: push_fanout,
@@ -198,10 +197,34 @@ impl Cluster {
             mst: HashMap::new(),
             prunes: HashMap::new(),
             pushes: HashMap::new(),
-            rmr: gossip_stats::RelativeMessageRedundancy::default(),
+            rmr: RelativeMessageRedundancy::default(),
             failed_nodes: HashSet::new(),
             total_prunes: 0,
-            egress_message_count: EgressMessages::new(stakes),
+            egress_message_count: HashMap::default(),
+        }
+    }
+
+    pub fn new_with_stats(
+        push_fanout: usize,
+        stakes: &HashMap<Pubkey, u64>,
+    ) -> Self {
+        let mut counts: HashMap<Pubkey, u64> = HashMap::default();
+        for (pubkey, _) in stakes.iter() {
+            counts.insert(*pubkey, 0);
+        }
+        Cluster { 
+            gossip_push_fanout: push_fanout,
+            visited: HashSet::new(),
+            queue: VecDeque::new(),
+            distances: HashMap::new(),
+            orders: HashMap::new(),
+            mst: HashMap::new(),
+            prunes: HashMap::new(),
+            pushes: HashMap::new(),
+            rmr: RelativeMessageRedundancy::default(),
+            failed_nodes: HashSet::new(),
+            total_prunes: 0,
+            egress_message_count: counts,
         }
     }
 
@@ -217,6 +240,7 @@ impl Cluster {
         self.pushes.clear();
         self.rmr.reset();
         self.total_prunes = 0;
+        self.egress_message_count.clear();
     }
 
     pub fn get_outbound_degree(
@@ -435,14 +459,20 @@ impl Cluster {
 
     pub fn get_rmr_struct(
         &self,
-    ) -> &gossip_stats::RelativeMessageRedundancy {
+    ) -> &RelativeMessageRedundancy {
         &self.rmr
     }
 
-    pub fn get_egress_messages(
+    pub fn clear_egress_message_count(
         &mut self,
-    ) -> &mut gossip_stats::EgressMessages {
-        &mut self.egress_message_count
+    ) {
+        self.egress_message_count.clear();
+    }
+
+    pub fn get_egress_messages(
+        &self,
+    ) -> &HashMap<Pubkey, u64> {
+        &self.egress_message_count
     }
 
     fn initialize(
@@ -484,6 +514,8 @@ impl Cluster {
             // insert current node into pushes map
             self.pushes.insert(current_node_pubkey, HashSet::new());
 
+            self.egress_message_count.insert(current_node_pubkey, 0);
+
             // For each peer of the current node's PASE (limit PUSH_FANOUT), 
             // update its distance and add it to the queue if it has not been visited
             let mut pase_counter: usize = 0;
@@ -514,8 +546,14 @@ impl Cluster {
                         .unwrap()
                         .insert(*neighbor);
 
-                    // add one to current_node egress_message_count
-                    self.egress_message_count.increment(&current_node_pubkey);
+                    *self.egress_message_count
+                        .get_mut(&current_node_pubkey)
+                        .unwrap() += 1;
+
+                    // if self.egress_message_count.initialized() {
+                    //     // add one to current_node egress_message_count
+                    //     self.egress_message_count.increment(&current_node_pubkey);
+                    // }
 
                     // Ensure the neighbor hasn't pruned us!
                     match self.prune_exists(neighbor, &current_node_pubkey) {
@@ -1019,7 +1057,7 @@ mod tests {
             .map(|node| (node.pubkey(), node))
             .collect();
 
-        let mut cluster: Cluster = Cluster::new(PUSH_FANOUT, &stakes);
+        let mut cluster: Cluster = Cluster::new(PUSH_FANOUT);
         let origin_pubkey = &pubkey; //just a temp origin selection
         cluster.run_gossip(origin_pubkey, &stakes, &node_map);
 
