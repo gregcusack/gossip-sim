@@ -14,12 +14,11 @@ use {
         StepSize,
     },
     std::{
-        time::{SystemTime, UNIX_EPOCH},
+        time::{SystemTime, UNIX_EPOCH, Duration},
         sync::{Arc, Mutex},
         collections::VecDeque,
         thread,
     },
-
 };
 
 static mut TRACKER: Option<Arc<Mutex<Tracker>>> = None;
@@ -323,8 +322,10 @@ impl InfluxDataPoint {
             .unwrap()
             .as_nanos();
 
+        // need this delay because timestamps are somtimes the same across calls to this method
+        // when this happens influx takes only one of the datapoints with the same timestamp
+        std::thread::sleep(Duration::from_micros(1));
         format!("{}\n", ts)
-        // format!("{}", ts)
     }
 
     pub fn append_timestamp(
@@ -556,14 +557,16 @@ impl InfluxDataPoint {
         simulation_iter_val: usize,
     ) {
         for (bucket, egress_count) in egress_messages.entries().iter() {
-            let bucket_min = egress_messages.min_entry() + bucket * egress_messages.bucket_range();
-            let bucket_max = egress_messages.min_entry() + (bucket + 1) * egress_messages.bucket_range() - 1;
-            if bucket_min == bucket_max {
-                debug!("Bucket: {}: Message Count: {}", bucket_max, egress_count);
-            } else {
-                debug!("Bucket: {}-{}: Message Count: {}", bucket_min, bucket_max, egress_count);
-            }
-            let data_point  = format!("egress_message_count,simulation_iter={} bucket={},count={} ", simulation_iter_val, bucket_max, egress_count);
+            // let bucket_min = egress_messages.min_entry() + bucket * egress_messages.bucket_range();
+            // let bucket_max = egress_messages.min_entry() + (bucket + 1) * egress_messages.bucket_range() - 1;
+            // if bucket_min == bucket_max {
+            //     debug!("Bucket: {}: Message Count: {}", bucket_max, egress_count);
+            // } else {
+            //     debug!("Bucket: {}-{}: Message Count: {}", bucket_min, bucket_max, egress_count);
+            // }
+            // let data_point  = format!("egress_message_count,simulation_iter={} bucket={},count={} ", simulation_iter_val, bucket_max / 1000000000 , egress_count);
+            let data_point  = format!("egress_message_count,simulation_iter={} bucket={},count={} ", simulation_iter_val, bucket , egress_count);
+
 
             self.datapoint.push_str(data_point.as_str());
             self.set_and_append_timestamp();

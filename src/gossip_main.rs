@@ -420,6 +420,9 @@ fn run_simulation(
 
         cluster.chance_to_rotate(&mut nodes, config.gossip_active_set_size, &stakes, config.probability_of_rotation);
 
+        if gossip_iteration + 1 == config.warm_up_rounds {
+            cluster.get_egress_messages().clear();
+        }
 
         // wait until after warmup rounds to begin calculating gossip stats and reporting to influx
         if gossip_iteration >= config.warm_up_rounds {
