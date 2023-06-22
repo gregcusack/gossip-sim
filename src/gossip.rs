@@ -121,6 +121,8 @@ pub struct Config<'a> {
     pub min_ingress_nodes: usize,
     pub filter_zero_staked_nodes: bool,
     pub num_buckets_for_stranded_node_hist: u64,
+    pub num_buckets_for_egress_message_hist: u64,
+    pub num_buckets_for_hops_stats_hist: u64,
     pub fraction_to_fail: f64,
     pub when_to_fail: usize,
     pub test_type: Testing,
