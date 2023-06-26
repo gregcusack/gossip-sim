@@ -146,11 +146,11 @@ fn parse_matches() -> ArgMatches {
                 .help("Number of buckets for the stranded node histogram. see gossip_stats.rs"),
         )
         .arg(
-            Arg::with_name("num_buckets_for_egress_message_hist")
-                .long("num-buckets-egress")
+            Arg::with_name("num_buckets_for_message_hist")
+                .long("num-buckets-message")
                 .takes_value(true)
                 .default_value("100")
-                .help("Number of buckets for the egress message histogram. see gossip_stats.rs"),
+                .help("Number of buckets for the ingress/egress message histograms. see gossip_stats.rs"),
         )
         .arg(
             Arg::with_name("num_buckets_for_hops_stats_hist")
@@ -371,12 +371,9 @@ fn run_simulation(
     let mut stats = GossipStats::default();
     stats.set_simulation_parameters(config);
     stats.set_origin(*origin_pubkey);
-    stats.initialize_egress_message_stats(&stakes);
+    stats.initialize_message_stats(&stakes);
 
-    let mut cluster: Cluster = Cluster::new_with_stats(
-        config.gossip_push_fanout,
-        &stakes,
-    );
+    let mut cluster: Cluster = Cluster::new(config.gossip_push_fanout);
 
     info!("ORIGIN: {:?}", origin_pubkey);
     let mut _number_of_poor_coverage_runs: usize = 0;
@@ -439,6 +436,10 @@ fn run_simulation(
 
         cluster.chance_to_rotate(&mut nodes, config.gossip_active_set_size, &stakes, config.probability_of_rotation);
 
+        if gossip_iteration + 1 == config.warm_up_rounds {
+            cluster.clear_message_counts();
+        }
+
         // wait until after warmup rounds to begin calculating gossip stats and reporting to influx
         if gossip_iteration >= config.warm_up_rounds {
             // don't care about gossip_iteration 0->warm_up_rounds.
@@ -467,8 +468,9 @@ fn run_simulation(
 
             stats.calculate_outbound_branching_factor(cluster.get_pushes());
 
-            stats.update_egress_message_counts(
-                cluster.get_egress_messages()
+            stats.update_message_counts(
+                cluster.get_egress_messages(),
+                cluster.get_ingress_messages()
             );
 
             match datapoint_queue {
@@ -541,7 +543,7 @@ fn run_simulation(
             stats.build_aggregate_hops_stats_histogram(30, 0, config.num_buckets_for_hops_stats_hist);
         }
 
-        stats.build_egress_message_histogram(config.num_buckets_for_egress_message_hist, true, &stakes);
+        stats.build_message_histograms(config.num_buckets_for_message_hist, true, &stakes);
 
         stats.run_all_calculations();
         gossip_stats_collection.push(stats.clone());
@@ -571,8 +573,15 @@ fn run_simulation(
                 );
 
                 // TODO: refactor. should be stat.get_egress_messages();
-                datapoint.create_egress_messages_point(
+                datapoint.create_messages_point(
+                    "egress_message_count".to_string(),
                     stats.get_egress_messages_histogram(),
+                    simulation_iteration
+                );
+
+                datapoint.create_messages_point(
+                    "ingress_message_count".to_string(),
+                    stats.get_ingress_messages_histogram(),
                     simulation_iteration
                 );
 
@@ -605,7 +614,7 @@ fn main() {
         when_to_fail: value_t_or_exit!(matches, "when_to_fail", usize),
         filter_zero_staked_nodes: matches.is_present("remove_zero_staked_nodes"),
         num_buckets_for_stranded_node_hist: value_t_or_exit!(matches, "num_buckets_for_stranded_node_hist", u64),
-        num_buckets_for_egress_message_hist: value_t_or_exit!(matches, "num_buckets_for_egress_message_hist", u64),
+        num_buckets_for_message_hist: value_t_or_exit!(matches, "num_buckets_for_message_hist", u64),
         num_buckets_for_hops_stats_hist: value_t_or_exit!(matches, "num_buckets_for_hops_stats_hist", u64),
         test_type: matches
                     .value_of("test_type")
@@ -647,7 +656,11 @@ fn main() {
 
     let mut datapoint_queue: Option<Arc<Mutex<VecDeque<InfluxDataPoint>>>> = None;
     let mut influx_thread: Option<JoinHandle<()>> = None;
-    let influx_type = matches.value_of("influx").unwrap_or_default().to_string().clone();
+    let influx_type = matches
+        .value_of("influx")
+        .unwrap_or_default()
+        .to_string()
+        .clone();
     
     if influx_type == "l".to_string() || influx_type == "i".to_string() {
         datapoint_queue = Some(Arc::new(Mutex::new(VecDeque::new())));
@@ -884,8 +897,6 @@ fn main() {
             warn!("WARNING: Gossip Stats Collection is empty. Is `Iterations` <= `warm-up-rounds`?");
         }
     }
-
-
 }
 
 #[cfg(test)]
