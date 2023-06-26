@@ -564,7 +564,7 @@ impl InfluxDataPoint {
             self.set_and_append_timestamp();
         }
 
-        info!("egress histogram point: {}", self.datapoint);
+        debug!("egress histogram point: {}", self.datapoint);
     }
 
 
