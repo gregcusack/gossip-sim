@@ -335,6 +335,20 @@ fn run_simulation(
         .map(|node| (node.pubkey(), node.stake()))
         .collect();
 
+    //collect vector of nodes
+    info!("Simulating Gossip and setting active sets. Please wait.....");
+    let _res = initialize_gossip(&mut nodes, &stakes, config.gossip_active_set_size).unwrap();
+    info!("Simulation Complete!");
+
+    let origin_node = find_nth_largest_node(config.origin_rank, &nodes).unwrap();
+    let origin_pubkey = &origin_node.pubkey();
+
+    let mut stats = GossipStats::default();
+    stats.set_simulation_parameters(config);
+    stats.set_origin(*origin_pubkey);
+    stats.initialize_message_stats(&stakes);
+    stats.build_validator_stake_distribution_histogram(10, &stakes);
+
     if simulation_iteration == 0 {
         match datapoint_queue {
             Some(ref dp_queue) => {
@@ -354,24 +368,18 @@ fn run_simulation(
                     start,
                     config.test_type,
                 );
+                // dp_queue.lock().unwrap().push_back(datapoint);
+
+                datapoint.create_validator_stake_distribution_histogram_point(
+                    stats.get_validator_stake_distribution_histogram()
+                );
+
                 dp_queue.lock().unwrap().push_back(datapoint);
+
             }
             _ => { }
         }
     }
-    
-    //collect vector of nodes
-    info!("Simulating Gossip and setting active sets. Please wait.....");
-    let _res = initialize_gossip(&mut nodes, &stakes, config.gossip_active_set_size).unwrap();
-    info!("Simulation Complete!");
-
-    let origin_node = find_nth_largest_node(config.origin_rank, &nodes).unwrap();
-    let origin_pubkey = &origin_node.pubkey();
-
-    let mut stats = GossipStats::default();
-    stats.set_simulation_parameters(config);
-    stats.set_origin(*origin_pubkey);
-    stats.initialize_message_stats(&stakes);
 
     let mut cluster: Cluster = Cluster::new(config.gossip_push_fanout);
 

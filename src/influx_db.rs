@@ -463,6 +463,20 @@ impl InfluxDataPoint {
         self.append_timestamp();
     }
 
+    pub fn create_validator_stake_distribution_histogram_point(
+        &mut self,
+        stake_distribution_histogram: &Histogram,
+    ) {
+        for (bucket, count) in stake_distribution_histogram.entries().iter() {
+            let data_point  = format!("validator_stake_distribution bucket={},count={} ", bucket , count);
+            self.datapoint.push_str(data_point.as_str());
+            self.set_and_append_timestamp();
+        }
+
+        info!("validator stake dis histogram point: {}", self.datapoint);
+
+    }
+
     pub fn create_config_point(
         &mut self,
         push_fanout: usize,
@@ -559,14 +573,12 @@ impl InfluxDataPoint {
         messages: &Histogram,
         simulation_iter_val: usize,
     ) {
-        for (bucket, egress_count) in messages.entries().iter() {
-            let data_point  = format!("{},simulation_iter={} bucket={},count={} ", messages_direction, simulation_iter_val, bucket , egress_count);
+        for (bucket, message_count) in messages.entries().iter() {
+            let data_point  = format!("{},simulation_iter={} bucket={},count={} ", messages_direction, simulation_iter_val, bucket , message_count);
             self.datapoint.push_str(data_point.as_str());
             self.set_and_append_timestamp();
         }
 
         debug!("{} histogram point: {}", messages_direction, self.datapoint);
     }
-
-
 }
