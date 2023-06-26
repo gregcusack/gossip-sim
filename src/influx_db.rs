@@ -553,18 +553,19 @@ impl InfluxDataPoint {
     // We want to pass in the actual bucket values instead of the stake values
     // that way when we see bucket 1, we know that that is the lowest 1-2% of all 
     // staked nodes in the network
-    pub fn create_egress_messages_point(
+    pub fn create_messages_point(
         &mut self,
-        egress_messages: &Histogram,
+        messages_direction: String,
+        messages: &Histogram,
         simulation_iter_val: usize,
     ) {
-        for (bucket, egress_count) in egress_messages.entries().iter() {
-            let data_point  = format!("egress_message_count,simulation_iter={} bucket={},count={} ", simulation_iter_val, bucket , egress_count);
+        for (bucket, egress_count) in messages.entries().iter() {
+            let data_point  = format!("{},simulation_iter={} bucket={},count={} ", messages_direction, simulation_iter_val, bucket , egress_count);
             self.datapoint.push_str(data_point.as_str());
             self.set_and_append_timestamp();
         }
 
-        debug!("egress histogram point: {}", self.datapoint);
+        debug!("{} histogram point: {}", messages_direction, self.datapoint);
     }
 
 

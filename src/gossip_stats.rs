@@ -357,13 +357,13 @@ impl StatCollection {
 // pass these buckets/counts as two different metrics to influx. 
 // grafana can then bar chart them
 #[derive(Debug, Clone)]
-pub struct EgressMessages {
+pub struct EgressIngressMessageTracker {
     counts: HashMap<Pubkey, u64>,
     count_per_bucket: Vec<u64>,
     histogram: Histogram,
 }
 
-impl Default for EgressMessages {
+impl Default for EgressIngressMessageTracker {
     fn default() -> Self {
         Self {
             counts: HashMap::default(),
@@ -373,7 +373,7 @@ impl Default for EgressMessages {
     }
 }
 
-impl EgressMessages {
+impl EgressIngressMessageTracker {
     // initialize entire counts map. want to include all nodes
     // when we build our histogram
     pub fn initialize_counts_map(
@@ -420,12 +420,14 @@ impl EgressMessages {
         )
     }
 
-    pub fn normalize_egress_message_counts(
+    pub fn normalize_message_counts(
         &mut self,
+        test_direction: bool, //true: egress, false: ingress
     ) {
         self.histogram
             .normalize_histogram(
-                &self.count_per_bucket
+                &self.count_per_bucket,
+                test_direction,
         );
     }
 
@@ -666,9 +668,13 @@ impl Histogram {
     pub fn normalize_histogram(
         &mut self,
         normalization_vector: &Vec<u64>,
+        test_direction: bool, //true: egress, false: ingress
     ) {
         for (bucket, value) in self.entries.iter_mut() {
             let nodes_in_bucket = normalization_vector[*bucket as usize];
+            if !test_direction {
+                info!("nodes in bucket: {}", nodes_in_bucket);
+            }
             if nodes_in_bucket != 0 {
                 *value = *value / nodes_in_bucket;
             }
@@ -1229,7 +1235,8 @@ pub struct GossipStats {
     origin: Pubkey,
     pub simulation_parameters: SimulationParamaters,
     failed_nodes: HashSet<Pubkey>,
-    egress_messages: EgressMessages,
+    egress_messages: EgressIngressMessageTracker,
+    ingress_messages: EgressIngressMessageTracker,
 }
 
 impl Default for GossipStats {
@@ -1243,7 +1250,8 @@ impl Default for GossipStats {
             origin: Pubkey::default(),
             simulation_parameters: SimulationParamaters::default(),
             failed_nodes: HashSet::default(),
-            egress_messages: EgressMessages::default()
+            egress_messages: EgressIngressMessageTracker::default(),
+            ingress_messages: EgressIngressMessageTracker::default(),
         }
     }
 }
@@ -1720,35 +1728,40 @@ impl GossipStats {
         }
     }
 
-    pub fn update_egress_message_counts(
+    pub fn update_message_counts(
         &mut self,
-        new_messages: &HashMap<Pubkey, u64>,
+        new_egress_messages: &HashMap<Pubkey, u64>,
+        new_ingress_messages: &HashMap<Pubkey, u64>,
     ) {
-        self.egress_messages.update_message_counts(new_messages);
+        self.egress_messages.update_message_counts(new_egress_messages);
+        self.ingress_messages.update_message_counts(new_ingress_messages);
     }
 
-    pub fn build_egress_message_histogram(
+    pub fn build_message_histograms(
         &mut self,
         num_buckets: u64,
         normalize_histogram: bool,
         stakes: &HashMap<Pubkey, u64>,
     ) {
         self.egress_messages.build_histogram(num_buckets, stakes);
+        self.ingress_messages.build_histogram(num_buckets, stakes);
         if normalize_histogram {
-            self.egress_messages.normalize_egress_message_counts();
+            self.egress_messages.normalize_message_counts(true);
+            self.ingress_messages.normalize_message_counts(false);
         }
     }
 
-    pub fn initialize_egress_message_stats(
+    pub fn initialize_message_stats(
         &mut self,
         stakes: &HashMap<Pubkey, u64>
     ) {
         self.egress_messages.initialize_counts_map(&stakes);
+        self.ingress_messages.initialize_counts_map(&stakes);
     }
 
     pub fn get_egress_message_stats(
         &mut self,
-    ) -> &mut EgressMessages {
+    ) -> &mut EgressIngressMessageTracker {
         &mut self.egress_messages
     }
 
@@ -1762,6 +1775,12 @@ impl GossipStats {
         &self,
     ) -> &Histogram {
         self.egress_messages.get_histogram()
+    }
+
+    pub fn get_ingress_messages_histogram(
+        &self,
+    ) -> &Histogram {
+        self.ingress_messages.get_histogram()
     }
 
     pub fn print_egress_message_histogram(
