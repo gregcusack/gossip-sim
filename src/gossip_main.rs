@@ -347,7 +347,7 @@ fn run_simulation(
     stats.set_simulation_parameters(config);
     stats.set_origin(*origin_pubkey);
     stats.initialize_message_stats(&stakes);
-    stats.build_validator_stake_distribution_histogram(10, &stakes);
+    stats.build_validator_stake_distribution_histogram(100, &stakes);
 
     if simulation_iteration == 0 {
         match datapoint_queue {
