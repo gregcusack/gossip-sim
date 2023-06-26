@@ -13,11 +13,12 @@ use {
         StepSize,
     },
     std::{
-        time::{SystemTime, UNIX_EPOCH, Duration},
+        time::{SystemTime, UNIX_EPOCH},
         sync::{Arc, Mutex},
         collections::VecDeque,
         thread,
     },
+
 };
 
 static mut TRACKER: Option<Arc<Mutex<Tracker>>> = None;
@@ -321,10 +322,8 @@ impl InfluxDataPoint {
             .unwrap()
             .as_nanos();
 
-        // need this delay because timestamps are somtimes the same across calls to this method
-        // when this happens influx takes only one of the datapoints with the same timestamp
-        std::thread::sleep(Duration::from_micros(1));
         format!("{}\n", ts)
+        // format!("{}", ts)
     }
 
     pub fn append_timestamp(
@@ -345,21 +344,6 @@ impl InfluxDataPoint {
         &mut self,
     ) {
         self.datapoint.push_str(self.get_timestamp_now().as_str());
-    }
-
-    pub fn create_rmr_data_point(
-        &mut self,
-        (rmr, total_messages, total_nodes_rx_message): (f64, u64, u64),
-    ) {
-        self.datapoint.push_str(
-            format!("rmr,simulation_iter={} rmr={},m={},n={} ", 
-                self.simulation_iteration, 
-                rmr,
-                total_messages,
-                total_nodes_rx_message
-            ).as_str()
-        );
-        self.append_timestamp();
     }
 
     pub fn create_data_point(
@@ -463,19 +447,6 @@ impl InfluxDataPoint {
         self.append_timestamp();
     }
 
-    pub fn create_validator_stake_distribution_histogram_point(
-        &mut self,
-        stake_distribution_histogram: &Histogram,
-    ) {
-        for (bucket, count) in stake_distribution_histogram.entries().iter() {
-            let data_point  = format!("validator_stake_distribution bucket={},count={} ", bucket , count);
-            self.datapoint.push_str(data_point.as_str());
-            self.set_and_append_timestamp();
-        }
-
-        debug!("validator stake dis histogram point: {}", self.datapoint);
-    }
-
     pub fn create_config_point(
         &mut self,
         push_fanout: usize,
@@ -562,22 +533,5 @@ impl InfluxDataPoint {
         debug!("histogram point: {}", self.datapoint);
     }
 
-    // for egress message histogram, since the x axis is percentage of stake
-    // We want to pass in the actual bucket values instead of the stake values
-    // that way when we see bucket 1, we know that that is the lowest 1-2% of all 
-    // staked nodes in the network
-    pub fn create_messages_point(
-        &mut self,
-        messages_direction: String,
-        messages: &Histogram,
-        simulation_iter_val: usize,
-    ) {
-        for (bucket, message_count) in messages.entries().iter() {
-            let data_point  = format!("{},simulation_iter={} bucket={},count={} ", messages_direction, simulation_iter_val, bucket , message_count);
-            self.datapoint.push_str(data_point.as_str());
-            self.set_and_append_timestamp();
-        }
 
-        debug!("{} histogram point: {}", messages_direction, self.datapoint);
-    }
 }

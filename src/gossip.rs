@@ -7,15 +7,14 @@ use {
         rpc_client::RpcClient, rpc_config::RpcGetVoteAccountsConfig,
         rpc_response::RpcVoteAccountStatus,
     },
-    gossip_stats::{
-        RelativeMessageRedundancy
-    },
     solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey},
     std::{
         collections::{HashMap, HashSet, VecDeque},
         sync::Arc,
         time::{Instant},
         str::FromStr,
+        fs::File,
+        io::{BufWriter, Write},
         iter::repeat,
     },
     rand::{
@@ -121,8 +120,6 @@ pub struct Config<'a> {
     pub min_ingress_nodes: usize,
     pub filter_zero_staked_nodes: bool,
     pub num_buckets_for_stranded_node_hist: u64,
-    pub num_buckets_for_message_hist: u64,
-    pub num_buckets_for_hops_stats_hist: u64,
     pub fraction_to_fail: f64,
     pub when_to_fail: usize,
     pub test_type: Testing,
@@ -162,7 +159,7 @@ pub struct Cluster {
     // src_node => dst_nodes {A, B, C, ..., N}
     pushes: HashMap<Pubkey, HashSet<Pubkey>>,
 
-    rmr: RelativeMessageRedundancy,
+    rmr: gossip_stats::RelativeMessageRedundancy,
 
     // prunes_v2: self_pubkey => peer => vec<origin>
     // aka who (peer) sent us (self_pubkey) the extra message. and who (origin) created that extra messages
@@ -177,18 +174,12 @@ pub struct Cluster {
     // count total prunes per iteration. 
     // will help determine steady state and required warmup rounds
     total_prunes: usize,
-
-    // count the total number of messages a node is pushing to
-    // NOTE: we want to use this with stakes to see how egress amounts
-    // vary with stake size. Also if we increase push_fanout, does that
-    // increase egress count a ton?
-    egress_message_count: HashMap<Pubkey, u64>,
-    ingress_message_count: HashMap<Pubkey, u64>,
 }
 
 impl Cluster {
+
     pub fn new(
-        push_fanout: usize,
+        push_fanout: usize
     ) -> Self {
         Cluster { 
             gossip_push_fanout: push_fanout,
@@ -199,11 +190,9 @@ impl Cluster {
             mst: HashMap::new(),
             prunes: HashMap::new(),
             pushes: HashMap::new(),
-            rmr: RelativeMessageRedundancy::default(),
+            rmr: gossip_stats::RelativeMessageRedundancy::default(),
             failed_nodes: HashSet::new(),
             total_prunes: 0,
-            egress_message_count: HashMap::default(),
-            ingress_message_count: HashMap::default(),
         }
     }
 
@@ -219,8 +208,6 @@ impl Cluster {
         self.pushes.clear();
         self.rmr.reset();
         self.total_prunes = 0;
-        self.egress_message_count.clear();
-        self.ingress_message_count.clear();
     }
 
     pub fn get_outbound_degree(
@@ -429,41 +416,41 @@ impl Cluster {
     // if calculated return it. 
     pub fn relative_message_redundancy(
         &mut self,
-    ) -> Result<(f64, u64, u64), String> {
+    ) -> Result<f64, String> {
         if self.rmr.rmr() == 0.0 {
             self.rmr.calculate_rmr()
         } else {
-            Ok((self.rmr.rmr(), self.rmr.total_messages_sent(), self.rmr.total_nodes_that_received_message()))
+            Ok(self.rmr.rmr())
         }
     }
 
     pub fn get_rmr_struct(
         &self,
-    ) -> &RelativeMessageRedundancy {
+    ) -> &gossip_stats::RelativeMessageRedundancy {
         &self.rmr
     }
 
-    pub fn clear_message_counts(
-        &mut self,
-    ) {
-        for (_, count) in self.egress_message_count.iter_mut() {
-            *count = 0;
-        }
-        for (_, count) in self.ingress_message_count.iter_mut() {
-            *count = 0;
-        }
-    }
-
-    pub fn get_egress_messages(
+    pub fn write_adjacency_list_to_file(
         &self,
-    ) -> &HashMap<Pubkey, u64> {
-        &self.egress_message_count
-    }
+        filename: &str,
+    ) -> std::io::Result<()> {
+        let file = File::create(filename)?;
+        let mut writer = BufWriter::new(file);
 
-    pub fn get_ingress_messages(
-        &self,
-    ) -> &HashMap<Pubkey, u64> {
-        &self.ingress_message_count
+        for (src_node, dst_nodes) in self.mst.iter() {
+            // Write the source node
+            write!(writer, "{:-4}:", src_node)?;
+            
+            // Write the destination nodes
+            for dst_node in dst_nodes {
+                write!(writer, " {:-4}", dst_node)?;
+            }
+
+            // End the line
+            writeln!(writer)?;
+        }
+
+        Ok(())
     }
 
     fn initialize(
@@ -505,8 +492,6 @@ impl Cluster {
             // insert current node into pushes map
             self.pushes.insert(current_node_pubkey, HashSet::new());
 
-            self.egress_message_count.insert(current_node_pubkey, 0);
-
             // For each peer of the current node's PASE (limit PUSH_FANOUT), 
             // update its distance and add it to the queue if it has not been visited
             let mut pase_counter: usize = 0;
@@ -536,15 +521,6 @@ impl Cluster {
                         .get_mut(&current_node_pubkey)
                         .unwrap()
                         .insert(*neighbor);
-
-                    *self.egress_message_count
-                        .get_mut(&current_node_pubkey)
-                        .unwrap() += 1;
-
-                    let ingress_count = self.ingress_message_count
-                        .entry(*neighbor)
-                        .or_insert(0);
-                    *ingress_count += 1;
 
                     // Ensure the neighbor hasn't pruned us!
                     match self.prune_exists(neighbor, &current_node_pubkey) {
