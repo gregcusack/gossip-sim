@@ -38,6 +38,12 @@ use {
     rand::SeedableRng,
     rayon::prelude::*,
     dotenv::dotenv,
+    gossip_sim::{
+        AGGREGATE_HOPS_FAIL_NODES_HISTOGRAM_UPPER_BOUND,
+        AGGREGATE_HOPS_MIN_INGRESS_NODES_HISTOGRAM_UPPER_BOUND,
+        STANDARD_HISTOGRAM_UPPER_BOUND,
+        VALIDATOR_STAKE_DISTRIBUTION_NUM_BUCKETS,
+    }
 };
 
 fn parse_matches() -> ArgMatches {
@@ -347,7 +353,10 @@ fn run_simulation(
     stats.set_simulation_parameters(config);
     stats.set_origin(*origin_pubkey);
     stats.initialize_message_stats(&stakes);
-    stats.build_validator_stake_distribution_histogram(100, &stakes);
+    stats.build_validator_stake_distribution_histogram(
+        VALIDATOR_STAKE_DISTRIBUTION_NUM_BUCKETS, 
+        &stakes
+    );
 
     if simulation_iteration == 0 {
         match datapoint_queue {
@@ -537,18 +546,18 @@ fn run_simulation(
         );
         if config.test_type == Testing::FailNodes {
             stats.build_aggregate_hops_stats_histogram(
-                (40.0 * (1.0 + config.fraction_to_fail)) as u64,
+                (AGGREGATE_HOPS_FAIL_NODES_HISTOGRAM_UPPER_BOUND * (1.0 + config.fraction_to_fail)) as u64,
                     0,
                     config.num_buckets_for_hops_stats_hist // 25  
             );
         } else if config.test_type == Testing::MinIngressNodes {
             stats.build_aggregate_hops_stats_histogram(
-                50,
-                    0,
-                    config.num_buckets_for_hops_stats_hist //25
+                AGGREGATE_HOPS_MIN_INGRESS_NODES_HISTOGRAM_UPPER_BOUND,
+                0,
+                config.num_buckets_for_hops_stats_hist //25
             );
         } else {
-            stats.build_aggregate_hops_stats_histogram(30, 0, config.num_buckets_for_hops_stats_hist);
+            stats.build_aggregate_hops_stats_histogram(STANDARD_HISTOGRAM_UPPER_BOUND, 0, config.num_buckets_for_hops_stats_hist);
         }
 
         stats.build_message_histograms(config.num_buckets_for_message_hist, true, &stakes);

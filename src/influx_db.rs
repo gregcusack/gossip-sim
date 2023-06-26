@@ -473,8 +473,7 @@ impl InfluxDataPoint {
             self.set_and_append_timestamp();
         }
 
-        info!("validator stake dis histogram point: {}", self.datapoint);
-
+        debug!("validator stake dis histogram point: {}", self.datapoint);
     }
 
     pub fn create_config_point(
