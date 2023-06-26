@@ -13,12 +13,11 @@ use {
         StepSize,
     },
     std::{
-        time::{SystemTime, UNIX_EPOCH},
+        time::{SystemTime, UNIX_EPOCH, Duration},
         sync::{Arc, Mutex},
         collections::VecDeque,
         thread,
     },
-
 };
 
 static mut TRACKER: Option<Arc<Mutex<Tracker>>> = None;
@@ -322,8 +321,10 @@ impl InfluxDataPoint {
             .unwrap()
             .as_nanos();
 
+        // need this delay because timestamps are somtimes the same across calls to this method
+        // when this happens influx takes only one of the datapoints with the same timestamp
+        std::thread::sleep(Duration::from_micros(1));
         format!("{}\n", ts)
-        // format!("{}", ts)
     }
 
     pub fn append_timestamp(
@@ -546,6 +547,24 @@ impl InfluxDataPoint {
         }
 
         debug!("histogram point: {}", self.datapoint);
+    }
+
+    // for egress message histogram, since the x axis is percentage of stake
+    // We want to pass in the actual bucket values instead of the stake values
+    // that way when we see bucket 1, we know that that is the lowest 1-2% of all 
+    // staked nodes in the network
+    pub fn create_egress_messages_point(
+        &mut self,
+        egress_messages: &Histogram,
+        simulation_iter_val: usize,
+    ) {
+        for (bucket, egress_count) in egress_messages.entries().iter() {
+            let data_point  = format!("egress_message_count,simulation_iter={} bucket={},count={} ", simulation_iter_val, bucket , egress_count);
+            self.datapoint.push_str(data_point.as_str());
+            self.set_and_append_timestamp();
+        }
+
+        debug!("egress histogram point: {}", self.datapoint);
     }
 
 
