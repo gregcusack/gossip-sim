@@ -1,3 +1,5 @@
+use core::num;
+
 use {
     crate::{
         Stats, 
@@ -373,6 +375,7 @@ impl Default for EgressIngressMessageTracker {
     }
 }
 
+
 impl EgressIngressMessageTracker {
     // initialize entire counts map. want to include all nodes
     // when we build our histogram
@@ -422,12 +425,10 @@ impl EgressIngressMessageTracker {
 
     pub fn normalize_message_counts(
         &mut self,
-        test_direction: bool, //true: egress, false: ingress
     ) {
         self.histogram
             .normalize_histogram(
                 &self.count_per_bucket,
-                test_direction,
         );
     }
 
@@ -580,6 +581,8 @@ impl Histogram {
         num_buckets: u64,
         input_entries: &Vec<u64>,
     ) {
+        // TODO refactor with build_from_map put everything up to "for entry..." into
+        // own function and call it
         self.min_entry = lower_bound;
         self.max_entry = upper_bound;
         self.num_buckets = num_buckets;
@@ -668,13 +671,9 @@ impl Histogram {
     pub fn normalize_histogram(
         &mut self,
         normalization_vector: &Vec<u64>,
-        test_direction: bool, //true: egress, false: ingress
     ) {
         for (bucket, value) in self.entries.iter_mut() {
             let nodes_in_bucket = normalization_vector[*bucket as usize];
-            if !test_direction {
-                info!("nodes in bucket: {}", nodes_in_bucket);
-            }
             if nodes_in_bucket != 0 {
                 *value = *value / nodes_in_bucket;
             }
@@ -1237,6 +1236,7 @@ pub struct GossipStats {
     failed_nodes: HashSet<Pubkey>,
     egress_messages: EgressIngressMessageTracker,
     ingress_messages: EgressIngressMessageTracker,
+    validator_stake_distribution: Histogram,
 }
 
 impl Default for GossipStats {
@@ -1252,6 +1252,7 @@ impl Default for GossipStats {
             failed_nodes: HashSet::default(),
             egress_messages: EgressIngressMessageTracker::default(),
             ingress_messages: EgressIngressMessageTracker::default(),
+            validator_stake_distribution: Histogram::default(),
         }
     }
 }
@@ -1746,8 +1747,8 @@ impl GossipStats {
         self.egress_messages.build_histogram(num_buckets, stakes);
         self.ingress_messages.build_histogram(num_buckets, stakes);
         if normalize_histogram {
-            self.egress_messages.normalize_message_counts(true);
-            self.ingress_messages.normalize_message_counts(false);
+            self.egress_messages.normalize_message_counts();
+            self.ingress_messages.normalize_message_counts();
         }
     }
 
@@ -1795,6 +1796,33 @@ impl GossipStats {
         for (index, count) in self.egress_messages.get_count_per_bucket().iter().enumerate() {
             info!("bucket index, count: {}, {}", index, count);
         }
+    }
+
+    pub fn build_validator_stake_distribution_histogram(
+        &mut self,
+        num_buckets: u64,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        let mut stakes_vec: Vec<u64> = stakes
+            .values()
+            .cloned()
+            .collect();
+
+        // sort by stake largest to smallest
+        stakes_vec.sort_by(|stake0, stake1| stake1.cmp(stake0));
+        
+        self.validator_stake_distribution.build(
+            stakes_vec[0], 
+            0, 
+            num_buckets, 
+            &stakes_vec,
+        )
+    }
+
+    pub fn get_validator_stake_distribution_histogram(
+        &self,
+    ) -> &Histogram {
+        &self.validator_stake_distribution
     }
 
     pub fn is_empty(
