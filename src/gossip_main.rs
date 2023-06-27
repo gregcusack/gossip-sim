@@ -1,5 +1,5 @@
 use {
-    clap::{crate_description, crate_name, App, Arg, ArgMatches, value_t_or_exit},
+    clap::{crate_description, crate_name, App, Arg, ArgMatches, value_t_or_exit, values_t_or_exit},
     log::{error, info, debug, warn, Level},
     gossip_sim::{
         API_MAINNET_BETA,
@@ -104,15 +104,13 @@ fn parse_matches() -> ArgMatches {
             Arg::with_name("origin_rank")
                 .long("origin-rank")
                 .takes_value(true)
+                .multiple_values(true)
                 .default_value("1")
-                .validator(|s| match s.parse::<usize>() {
-                    Ok(n) if n >= 1 => Ok(()),
-                    _ => Err(String::from("origin_rank must be at least 1")),
-                })
                 .help("Select an origin with origin rank for gossip.
                     e.g.    10 -> 10th largest stake
                             1000 -> 1000th largest stake
-                    Default is largest stake as origin"),
+                    Default is largest stake as origin
+                    Can pass in a list as well. Will iterate over all of them if test-type set"),
         )
         .arg(
             Arg::with_name("active_set_rotation_probability")
@@ -627,13 +625,15 @@ fn main() {
     solana_logger::setup();
 
     let matches = parse_matches();
+
+    let origin_ranks: Vec<usize> = values_t_or_exit!(matches, "origin_rank", usize);
     let config = Config {
         gossip_push_fanout: value_t_or_exit!(matches, "gossip_push_fanout", usize),
         gossip_active_set_size: value_t_or_exit!(matches, "gossip_push_active_set_entry_size", usize),
         gossip_iterations: value_t_or_exit!(matches, "gossip_iterations", usize),
         accounts_from_file: matches.is_present("accounts_from_yaml"),
         account_file: matches.value_of("account_file").unwrap_or_default(),
-        origin_rank: value_t_or_exit!(matches, "origin_rank", usize),
+        origin_rank: origin_ranks[0],
         probability_of_rotation: value_t_or_exit!(matches, "active_set_rotation_probability", f64),
         prune_stake_threshold: value_t_or_exit!(matches, "prune_stake_threshold", f64), 
         min_ingress_nodes: value_t_or_exit!(matches, "min_ingress_nodes", usize),
@@ -674,6 +674,18 @@ fn main() {
         warm_up_rounds: value_t_or_exit!(matches, "warm_up_rounds", usize),
         print_stats: matches.is_present("print_stats"),
     };
+
+    if origin_ranks.len() < config.num_simulations {
+        error!("ERROR: not enough origin ranks provided for num_simulations! origin_ranks.len(): {}, \
+            num_simulations: {}", origin_ranks.len(), config.num_simulations);
+            return;
+    } else if origin_ranks.len() > config.num_simulations {
+        warn!("WARNING: more origin ranks than number of simulations. Not going to hit all origin ranks");
+    } else if origin_ranks.len() > 1 && config.test_type != Testing::OriginRank {
+        error!("ERROR: multiple origin_ranks passed in but test type is not OriginRank. \
+            This would end up running all simulations with origin_rank[0]: {}", origin_ranks[0]);
+        return;
+    }
 
     if config.gossip_iterations <= config.warm_up_rounds {
         warn!("WARNING: Gossip Iterations ({}) <= Warm Up Rounds ({}). No stats will be recorded....", 
@@ -820,11 +832,8 @@ fn main() {
             }
         }
         Testing::OriginRank => {
-            let step_size: usize = config.step_size.into();
-            let initial_origin_rank = config.origin_rank;
-
             for i in 0..config.num_simulations {
-                let origin_rank = initial_origin_rank + (i * step_size);
+                let origin_rank = origin_ranks[i];
 
                 // Update the active_set_size in the config for each experiment
                 let mut config = config.clone();
