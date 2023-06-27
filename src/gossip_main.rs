@@ -33,6 +33,10 @@ use {
         env,
         sync::{Arc, Mutex},
         thread::JoinHandle,
+        time::{
+            SystemTime, 
+            UNIX_EPOCH, 
+        },
     },
     rand::rngs::StdRng,
     rand::SeedableRng,
@@ -247,6 +251,14 @@ fn validate_testing(val: &str) -> Result<(), String> {
         .map_err(|_| "Invalid test type".to_string())
 }
 
+pub fn get_timestamp() -> String {
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+
+    format!("{}", ts)
+}
 
 pub fn initialize_gossip(
     // nodes: &[RwLock<Node>],
@@ -283,6 +295,7 @@ fn run_simulation(
     gossip_stats_collection: &mut GossipStatsCollection, 
     datapoint_queue: &Option<Arc<Mutex<VecDeque<InfluxDataPoint>>>>,
     simulation_iteration: usize,
+    start_timestamp: &String,
     start_value: f64,
 ) {
     info!("##### SIMULATION ITERATION: {} #####", simulation_iteration);
@@ -359,7 +372,10 @@ fn run_simulation(
     if simulation_iteration == 0 {
         match datapoint_queue {
             Some(ref dp_queue) => {
-                let mut datapoint = InfluxDataPoint::default();
+                let mut datapoint = InfluxDataPoint::new(
+                    start_timestamp,
+                    simulation_iteration
+                );
                 let mut start = start_value.to_string();
                 if config.test_type == Testing::NoTest {
                     start = "N/A".to_string();
@@ -395,7 +411,10 @@ fn run_simulation(
 
     match datapoint_queue {
         Some(dp_queue) => {
-            let mut datapoint = InfluxDataPoint::default();
+            let mut datapoint = InfluxDataPoint::new(
+                start_timestamp,
+                simulation_iteration
+            );
             datapoint.set_start();
             dp_queue.lock().unwrap().push_back(datapoint);
         }
@@ -408,7 +427,10 @@ fn run_simulation(
             info!("GOSSIP ITERATION: {}", gossip_iteration);
             match datapoint_queue {
                 Some(dp_queue) => {
-                    let mut datapoint = InfluxDataPoint::new(simulation_iteration);
+                    let mut datapoint = InfluxDataPoint::new(
+                        start_timestamp,
+                        simulation_iteration
+                    );
                     datapoint.create_config_point(
                         config.gossip_push_fanout,
                         config.gossip_active_set_size,
@@ -493,7 +515,10 @@ fn run_simulation(
 
             match datapoint_queue {
                 Some(dp_queue) => {
-                    let mut datapoint = InfluxDataPoint::new(simulation_iteration);
+                    let mut datapoint = InfluxDataPoint::new(
+                        start_timestamp,
+                        simulation_iteration
+                    );
                     match cluster.relative_message_redundancy() {
                         Ok(result) => {
                             stats.insert_rmr(result.0);
@@ -569,7 +594,10 @@ fn run_simulation(
 
         match datapoint_queue {
             Some(dp_queue) => {
-                let mut datapoint = InfluxDataPoint::new(simulation_iteration);
+                let mut datapoint = InfluxDataPoint::new(
+                    start_timestamp,
+                    simulation_iteration
+                );
                 let data = stats.get_stranded_node_iteration_data();
                 datapoint.create_stranded_iteration_point(
                     data.0,
@@ -693,6 +721,8 @@ fn main() {
             config.warm_up_rounds);
     }
 
+    let start_timestamp = get_timestamp();
+
     let mut datapoint_queue: Option<Arc<Mutex<VecDeque<InfluxDataPoint>>>> = None;
     let mut influx_thread: Option<JoinHandle<()>> = None;
     let influx_type = matches
@@ -756,6 +786,7 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     initial_active_set_size as f64,
                 );
             }
@@ -782,6 +813,7 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     initial_push_fanout as f64,
                 );            
             }
@@ -805,6 +837,7 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     min_ingress_nodes as f64,
                 );           
              }
@@ -827,6 +860,7 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     initial_prune_stake_threshold as f64,
                 );            
             }
@@ -846,6 +880,7 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     origin_rank as f64,
                 );            
             }
@@ -868,6 +903,7 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     initial_fraction_to_fail as f64,
                 );           
             }
@@ -890,6 +926,7 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     intial_rotate_probability as f64,
                 );           
             }
@@ -902,6 +939,7 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     0 as f64,
                 );            
             }
