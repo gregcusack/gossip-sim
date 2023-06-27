@@ -1238,6 +1238,7 @@ pub struct GossipStats {
     egress_messages: EgressIngressMessageTracker,
     ingress_messages: EgressIngressMessageTracker,
     validator_stake_distribution: Histogram,
+    prune_messages: EgressIngressMessageTracker,
 }
 
 impl Default for GossipStats {
@@ -1254,6 +1255,7 @@ impl Default for GossipStats {
             egress_messages: EgressIngressMessageTracker::default(),
             ingress_messages: EgressIngressMessageTracker::default(),
             validator_stake_distribution: Histogram::default(),
+            prune_messages: EgressIngressMessageTracker::default(),
         }
     }
 }
@@ -1739,6 +1741,13 @@ impl GossipStats {
         self.ingress_messages.update_message_counts(new_ingress_messages);
     }
 
+    pub fn update_prune_counts(
+        &mut self,
+        new_prune_messages: &HashMap<Pubkey, u64>,
+    ) {
+        self.prune_messages.update_message_counts(new_prune_messages);
+    }
+
     pub fn build_message_histograms(
         &mut self,
         num_buckets: u64,
@@ -1753,24 +1762,31 @@ impl GossipStats {
         }
     }
 
+    pub fn build_prune_histogram(
+        &mut self,
+        num_buckets: u64,
+        normalize_histogram: bool,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        self.prune_messages.build_histogram(num_buckets, stakes);
+        if normalize_histogram {
+            self.prune_messages.normalize_message_counts();
+        }
+    }
+
     pub fn initialize_message_stats(
         &mut self,
         stakes: &HashMap<Pubkey, u64>
     ) {
-        self.egress_messages.initialize_counts_map(&stakes);
-        self.ingress_messages.initialize_counts_map(&stakes);
+        self.egress_messages.initialize_counts_map(stakes);
+        self.ingress_messages.initialize_counts_map(stakes);
+        self.prune_messages.initialize_counts_map(stakes);
     }
 
     pub fn get_egress_message_stats(
         &mut self,
     ) -> &mut EgressIngressMessageTracker {
         &mut self.egress_messages
-    }
-
-    pub fn clear_egress_message_count(
-        &mut self,
-    ) {
-        self.egress_messages.clear();
     }
 
     pub fn get_egress_messages_histogram(
@@ -1797,6 +1813,12 @@ impl GossipStats {
         for (index, count) in self.egress_messages.get_count_per_bucket().iter().enumerate() {
             info!("bucket index, count: {}, {}", index, count);
         }
+    }
+
+    pub fn get_prune_message_histogram(
+        &self,
+    ) -> &Histogram {
+        self.prune_messages.get_histogram()
     }
 
     pub fn build_validator_stake_distribution_histogram(
@@ -1957,7 +1979,6 @@ mod tests {
             collections::{HashMap},
         },
         solana_sdk::native_token::LAMPORTS_PER_SOL,
-        rand::rngs::StdRng,
     };
 
     pub fn calc_coverage(

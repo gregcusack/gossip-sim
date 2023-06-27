@@ -184,6 +184,9 @@ pub struct Cluster {
     // increase egress count a ton?
     egress_message_count: HashMap<Pubkey, u64>,
     ingress_message_count: HashMap<Pubkey, u64>,
+
+    // count the number of prune messages sent by stake
+    prune_messages_sent: HashMap<Pubkey, u64>,
 }
 
 impl Cluster {
@@ -204,6 +207,7 @@ impl Cluster {
             total_prunes: 0,
             egress_message_count: HashMap::default(),
             ingress_message_count: HashMap::default(),
+            prune_messages_sent: HashMap::default(), 
         }
     }
 
@@ -221,6 +225,7 @@ impl Cluster {
         self.total_prunes = 0;
         self.egress_message_count.clear();
         self.ingress_message_count.clear();
+        self.prune_messages_sent.clear();
     }
 
     pub fn get_outbound_degree(
@@ -452,6 +457,9 @@ impl Cluster {
         for (_, count) in self.ingress_message_count.iter_mut() {
             *count = 0;
         }
+        for (_, count) in self.prune_messages_sent.iter_mut() {
+            *count = 0;
+        }
     }
 
     pub fn get_egress_messages(
@@ -464,6 +472,12 @@ impl Cluster {
         &self,
     ) -> &HashMap<Pubkey, u64> {
         &self.ingress_message_count
+    }
+
+    pub fn get_prune_messages_sent(
+        &self,
+    ) -> &HashMap<Pubkey, u64> {
+        &self.prune_messages_sent
     }
 
     fn initialize(
@@ -697,6 +711,11 @@ impl Cluster {
             if prunes.len() > 0 {
                 self.total_prunes += prunes.len();
             }
+            let prune_count = self.prune_messages_sent
+                .entry(*pruner)
+                .or_insert(0);
+            *prune_count += prunes.len() as u64;
+
             for (current_pubkey, origins) in prunes {
                 // now we switch into the context of the prunee. 
                 // prunee now has to process the prune messages. so we do that here
