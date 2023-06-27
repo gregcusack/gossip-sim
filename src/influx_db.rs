@@ -254,6 +254,7 @@ pub struct InfluxDataPoint {
     datapoint: String,
     timestamp: String,
     simulation_iteration: usize,
+    start_timestamp: String,
 }
 
 impl Default for InfluxDataPoint {
@@ -262,18 +263,21 @@ impl Default for InfluxDataPoint {
             datapoint: "".to_string(),
             timestamp: get_timestamp_now(),
             simulation_iteration: 0,
+            start_timestamp: 0.to_string(),
         }
     }
 }
 
 impl InfluxDataPoint {
     pub fn new(
+        start_timestamp: &String,
         simulation_iter: usize,
     ) -> Self {
         Self {
             datapoint: "".to_string(),
             timestamp: get_timestamp_now(),
             simulation_iteration: simulation_iter,
+            start_timestamp: start_timestamp.to_owned(),
         }
     }
 
@@ -333,14 +337,6 @@ impl InfluxDataPoint {
         self.datapoint.push_str(self.timestamp.as_str());
     }
 
-    pub fn append_simulation_iteration(
-        &mut self,
-    ) {
-        self.datapoint.push_str(
-            format!("simulation_iter=\"{}\" ", self.simulation_iteration.to_string()).as_str()
-        );
-    }
-
     pub fn set_and_append_timestamp(
         &mut self,
     ) {
@@ -352,8 +348,9 @@ impl InfluxDataPoint {
         (rmr, total_messages, total_nodes_rx_message): (f64, u64, u64),
     ) {
         self.datapoint.push_str(
-            format!("rmr,simulation_iter={} rmr={},m={},n={} ", 
+            format!("rmr,simulation_iter={},start_time={} rmr={},m={},n={} ", 
                 self.simulation_iteration, 
+                self.start_timestamp,
                 rmr,
                 total_messages,
                 total_nodes_rx_message
@@ -368,9 +365,10 @@ impl InfluxDataPoint {
         stat_type: String,
     ) {
         self.datapoint.push_str(
-            format!("{},simulation_iter={} data={} ", 
+            format!("{},simulation_iter={},start_time={} data={} ", 
                 stat_type, 
                 self.simulation_iteration, 
+                self.start_timestamp,
                 data
             ).as_str()
         );
@@ -383,9 +381,10 @@ impl InfluxDataPoint {
     ) {
 
         self.datapoint.push_str(
-            format!("{},simulation_iter={} mean={},median={},max={} ", 
+            format!("{},simulation_iter={},start_time={} mean={},median={},max={} ", 
                 "hops_stat".to_string(), 
                 self.simulation_iteration,
+                self.start_timestamp,
                 data.mean(),
                 data.median(),
                 data.max()
@@ -399,9 +398,10 @@ impl InfluxDataPoint {
         data: &StrandedNodeStats,
     ) {
         self.datapoint.push_str(
-            format!("{},simulation_iter={} count={},mean={},median={},max={},min={} ", 
+            format!("{},simulation_iter={},start_time={} count={},mean={},median={},max={},min={} ", 
                 "stranded_node_stats".to_string(), 
                 self.simulation_iteration,
+                self.start_timestamp,
                 data.count(),
                 data.mean(),
                 data.median(),
@@ -418,13 +418,15 @@ impl InfluxDataPoint {
         simulation_iter_val: usize,
     ) {
         self.datapoint.push_str(
-            format!("iteration,simulation_iter={} gossip_iter={},simulation_iter_val={} ", 
+            format!("iteration,simulation_iter={},start_time={} gossip_iter={},simulation_iter_val={} ", 
                 self.simulation_iteration, 
+                self.start_timestamp,
                 gossip_iter,
                 simulation_iter_val
             ).as_str()
         );
         self.append_timestamp();
+        debug!("iteration_point: {}", self.datapoint);
     }
 
     pub fn create_test_type_point(
@@ -439,7 +441,8 @@ impl InfluxDataPoint {
         start_value: String,
         test_type: Testing,
     ) {
-        let data_point = format!("simulation_config num_simulations={},\
+        let data_point = format!("simulation_config,start_time={} \
+            num_simulations={},\
             gossip_iterations_per_simulation={},\
             warm_up_rounds={},\
             step_size={},\
@@ -448,6 +451,7 @@ impl InfluxDataPoint {
             api=\"{}\",\
             start_value=\"{}\",\
             test_type=\"{}\" ",
+                self.start_timestamp,
                 num_simulations,
                 gossip_iterations_per_simulation,
                 warm_up_rounds,
@@ -468,7 +472,11 @@ impl InfluxDataPoint {
         stake_distribution_histogram: &Histogram,
     ) {
         for (bucket, count) in stake_distribution_histogram.entries().iter() {
-            let data_point  = format!("validator_stake_distribution bucket={},count={} ", bucket , count);
+            let data_point  = format!("validator_stake_distribution,start_time={} bucket={},count={} ", 
+                self.start_timestamp,
+                bucket, 
+                count
+            );
             self.datapoint.push_str(data_point.as_str());
             self.set_and_append_timestamp();
         }
@@ -487,7 +495,7 @@ impl InfluxDataPoint {
         rotation_probability: f64,
     ) {
         self.datapoint.push_str(
-            format!("config,simulation_iter={} \
+            format!("config,simulation_iter={},start_time={} \
                 push_fanout={},\
                 active_set_size={},\
                 origin_rank={},\
@@ -496,6 +504,7 @@ impl InfluxDataPoint {
                 fraction_to_fail={},\
                 rotation_probability={} ",
                     self.simulation_iteration,
+                    self.start_timestamp,
                     push_fanout, 
                     active_set_size,
                     origin_rank,
@@ -519,7 +528,7 @@ impl InfluxDataPoint {
         median_weighted_stake: f64,
     ) {
         self.datapoint.push_str(
-            format!("stranded_node_iterations,simulation_iter={} \
+            format!("stranded_node_iterations,simulation_iter={},start_time={} \
                 total_stranded={},\
                 mean_iter_stranded_per_node={},\
                 mean_stranded_per_iter={},\
@@ -527,6 +536,7 @@ impl InfluxDataPoint {
                 median_iter_stranded={},\
                 mean_weighted_stake={},\
                 median_weighted_stake={} ", 
+                self.start_timestamp,
                 self.simulation_iteration,
                 total_stranded_iterations_count,
                 mean_number_of_iterations_node_stranded_for,
@@ -553,7 +563,11 @@ impl InfluxDataPoint {
             } else {
                 debug!("Bucket: {}-{}: Count: {}", bucket_min, bucket_max, count);
             }
-            let data_point  = format!("{} bucket={},count={} ", data_type, bucket_max, count);
+            let data_point  = format!("{} bucket={},count={} ", 
+                data_type,
+                bucket_max,
+                count
+            );
 
             self.datapoint.push_str(data_point.as_str());
             self.set_and_append_timestamp();
@@ -573,7 +587,13 @@ impl InfluxDataPoint {
         simulation_iter_val: usize,
     ) {
         for (bucket, message_count) in messages.entries().iter() {
-            let data_point  = format!("{},simulation_iter={} bucket={},count={} ", messages_direction, simulation_iter_val, bucket , message_count);
+            let data_point  = format!("{},simulation_iter={},start_time={} bucket={},count={} ", 
+                messages_direction, 
+                simulation_iter_val, 
+                self.start_timestamp,
+                bucket, 
+                message_count
+            );
             self.datapoint.push_str(data_point.as_str());
             self.set_and_append_timestamp();
         }
