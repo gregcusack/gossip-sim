@@ -1,5 +1,3 @@
-use core::num;
-
 use {
     crate::{
         Stats, 
@@ -607,7 +605,10 @@ impl Histogram {
             // Check if the entry is within the defined bounds
             if *entry >= self.min_entry && *entry <= self.max_entry {
                 // Determine the bucket index based on the entry value
-                let bucket = (entry - self.min_entry) / self.bucket_range;
+                let mut bucket = (entry - self.min_entry) / self.bucket_range;
+                if bucket == self.num_buckets {
+                    bucket -= 1;
+                }
 
                 // Increment the count for the bucket in the histogram
                 *self.entries.entry(bucket).or_insert(0) += 1;
@@ -651,7 +652,7 @@ impl Histogram {
                 let mut bucket: u64 = (*stake - self.min_entry) / self.bucket_range;
                 // info!("pubkey, stake, bucket, msgs: {:?}, {}, {}, {}", pubkey, stake, bucket, egress_messages);
                 if bucket == self.num_buckets {
-                    bucket = bucket - 1;
+                    bucket -= 1;
                 }
                 // add total egress messages to bucket entry.
                 // if bucket entry doesn't exist, begin it with the current egress_messages count

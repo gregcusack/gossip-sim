@@ -155,7 +155,7 @@ fn parse_matches() -> ArgMatches {
             Arg::with_name("num_buckets_for_message_hist")
                 .long("num-buckets-message")
                 .takes_value(true)
-                .default_value("100")
+                .default_value("5")
                 .help("Number of buckets for the ingress/egress message histograms. see gossip_stats.rs"),
         )
         .arg(
@@ -377,7 +377,6 @@ fn run_simulation(
                     start,
                     config.test_type,
                 );
-                // dp_queue.lock().unwrap().push_back(datapoint);
 
                 datapoint.create_validator_stake_distribution_histogram_point(
                     stats.get_validator_stake_distribution_histogram()
