@@ -489,6 +489,10 @@ fn run_simulation(
                 cluster.get_ingress_messages()
             );
 
+            stats.update_prune_counts(
+                cluster.get_prune_messages_sent(),
+            );
+
             match datapoint_queue {
                 Some(dp_queue) => {
                     let mut datapoint = InfluxDataPoint::new(simulation_iteration);
@@ -560,6 +564,7 @@ fn run_simulation(
         }
 
         stats.build_message_histograms(config.num_buckets_for_message_hist, true, &stakes);
+        stats.build_prune_histogram(config.num_buckets_for_message_hist, true, &stakes);
 
         stats.run_all_calculations();
         gossip_stats_collection.push(stats.clone());
@@ -598,6 +603,12 @@ fn run_simulation(
                 datapoint.create_messages_point(
                     "ingress_message_count".to_string(),
                     stats.get_ingress_messages_histogram(),
+                    simulation_iteration
+                );
+
+                datapoint.create_messages_point(
+                    "prune_message_count".to_string(),
+                    stats.get_prune_message_histogram(),
                     simulation_iteration
                 );
 
