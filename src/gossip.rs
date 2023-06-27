@@ -714,19 +714,23 @@ impl Cluster {
             let prune_count = self.prune_messages_sent
                 .entry(*pruner)
                 .or_insert(0);
-            *prune_count += prunes.len() as u64;
 
             for (current_pubkey, origins) in prunes {
                 // now we switch into the context of the prunee. 
                 // prunee now has to process the prune messages. so we do that here
                 // prunee is going to update it's active_set and remove the pruner 
                 // for the specific origin.
+
                 if let Some(current_node) = node_map.get(current_pubkey) {
                     debug!("For node {:?}, processing prune msg from {:?}", current_pubkey, pruner);
                     current_node.active_set.prune(current_pubkey, pruner, &origins[..], stakes);
                 } else {
-                    error!("ERROR. We should never reach here. all nodes in prunes_v2 should be in node_map");
+                    error!("ERROR. We should never reach here. all nodes in prunes should be in node_map");
                 }
+
+                // count prunes sent, not necessarily the individual prune messages sent out
+                // since in one prune message, we can prune a peer node for multiple origins
+                *prune_count += origins.len() as u64;
             }
         }
         trace!("total prunes: {}", self.total_prunes);
