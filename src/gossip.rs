@@ -174,16 +174,6 @@ pub struct Cluster {
     // count total prunes per iteration. 
     // will help determine steady state and required warmup rounds
     total_prunes: usize,
-
-    // count the total number of messages a node is pushing to
-    // NOTE: we want to use this with stakes to see how egress amounts
-    // vary with stake size. Also if we increase push_fanout, does that
-    // increase egress count a ton?
-    egress_message_count: HashMap<Pubkey, u64>,
-    ingress_message_count: HashMap<Pubkey, u64>,
-
-    // count the number of prune messages sent by stake
-    prune_messages_sent: HashMap<Pubkey, u64>,
 }
 
 impl Cluster {
@@ -203,9 +193,6 @@ impl Cluster {
             rmr: gossip_stats::RelativeMessageRedundancy::default(),
             failed_nodes: HashSet::new(),
             total_prunes: 0,
-            egress_message_count: HashMap::default(),
-            ingress_message_count: HashMap::default(),
-            prune_messages_sent: HashMap::default(), 
         }
     }
 
@@ -221,9 +208,6 @@ impl Cluster {
         self.pushes.clear();
         self.rmr.reset();
         self.total_prunes = 0;
-        self.egress_message_count.clear();
-        self.ingress_message_count.clear();
-        self.prune_messages_sent.clear();
     }
 
     pub fn get_outbound_degree(
@@ -446,36 +430,27 @@ impl Cluster {
         &self.rmr
     }
 
-    pub fn clear_message_counts(
-        &mut self,
-    ) {
-        for (_, count) in self.egress_message_count.iter_mut() {
-            *count = 0;
-        }
-        for (_, count) in self.ingress_message_count.iter_mut() {
-            *count = 0;
-        }
-        for (_, count) in self.prune_messages_sent.iter_mut() {
-            *count = 0;
-        }
-    }
-  
-    pub fn get_egress_messages(
+    pub fn write_adjacency_list_to_file(
         &self,
-    ) -> &HashMap<Pubkey, u64> {
-        &self.egress_message_count
-    }
+        filename: &str,
+    ) -> std::io::Result<()> {
+        let file = File::create(filename)?;
+        let mut writer = BufWriter::new(file);
 
-    pub fn get_ingress_messages(
-        &self,
-    ) -> &HashMap<Pubkey, u64> {
-        &self.ingress_message_count
-    }
+        for (src_node, dst_nodes) in self.mst.iter() {
+            // Write the source node
+            write!(writer, "{:-4}:", src_node)?;
+            
+            // Write the destination nodes
+            for dst_node in dst_nodes {
+                write!(writer, " {:-4}", dst_node)?;
+            }
 
-    pub fn get_prune_messages_sent(
-        &self,
-    ) -> &HashMap<Pubkey, u64> {
-        &self.prune_messages_sent
+            // End the line
+            writeln!(writer)?;
+        }
+
+        Ok(())
     }
 
     fn initialize(
@@ -698,26 +673,17 @@ impl Cluster {
             if prunes.len() > 0 {
                 self.total_prunes += prunes.len();
             }
-            let prune_count = self.prune_messages_sent
-                .entry(*pruner)
-                .or_insert(0);
-
             for (current_pubkey, origins) in prunes {
                 // now we switch into the context of the prunee. 
                 // prunee now has to process the prune messages. so we do that here
                 // prunee is going to update it's active_set and remove the pruner 
                 // for the specific origin.
-
                 if let Some(current_node) = node_map.get(current_pubkey) {
                     debug!("For node {:?}, processing prune msg from {:?}", current_pubkey, pruner);
                     current_node.active_set.prune(current_pubkey, pruner, &origins[..], stakes);
                 } else {
-                    error!("ERROR. We should never reach here. all nodes in prunes should be in node_map");
+                    error!("ERROR. We should never reach here. all nodes in prunes_v2 should be in node_map");
                 }
-
-                // count prunes sent, not necessarily the individual prune messages sent out
-                // since in one prune message, we can prune a peer node for multiple origins
-                *prune_count += origins.len() as u64;
             }
         }
         trace!("total prunes: {}", self.total_prunes);

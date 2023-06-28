@@ -119,7 +119,7 @@ active-set-size
 push-fanout
 min-ingress-nodes
 prune-stake-threshold
-origin-rank # See Option 7 below on how to run origin-rank test
+origin-rank
 fail-nodes
 [default: no-test]
 ```
@@ -175,19 +175,6 @@ cargo run --bin gossip-sim --
 - If you do set `--influx l`, you will still need the `.env` file to get the database name of your localhost instance.
 - We push `rmr`, `coverage`, `hops_stat`, `branching_factor`, and `stranded_node_stats` to influx. NOTE: each of thesea are held in their own series.
 - If you want to query `coverage` series for example. Run: `select * from coverage` from the `influx>` command line
-
-#### Option 7: Run a test for multiple origin ranks
-- When running an origin-rank test, unlike other test types, we do increment from a start value by a fixed value
-- For an OriginRank test type, you pass in a list of origin ranks you want to run e.g. `--origin-rank 1 50 100 1000`
-- Note the number of origin ranks must match `num-simulations` or else the test will fail
-```
-cargo run --bin gossip-sim --
-    --iterations <number_of_gossip_iterations> 
-    --origin-rank <list_of_origin_ranks>
-    --warm-up-rounds <warm_up_rounds>
-    --num-simulations <num_simulations>
-    --influx <localhost-or-internal-metrics.solana.com, l or i>
-```
 
 ## Interpreting the output
 Prints out coverage, RMR, Aggregate Hop info, LDH, stranded nodes
