@@ -13,11 +13,12 @@ use {
         StepSize,
     },
     std::{
-        time::{SystemTime, UNIX_EPOCH, Duration},
+        time::{SystemTime, UNIX_EPOCH},
         sync::{Arc, Mutex},
         collections::VecDeque,
         thread,
     },
+
 };
 
 static mut TRACKER: Option<Arc<Mutex<Tracker>>> = None;
@@ -325,10 +326,8 @@ impl InfluxDataPoint {
             .unwrap()
             .as_nanos();
 
-        // need this delay because timestamps are somtimes the same across calls to this method
-        // when this happens influx takes only one of the datapoints with the same timestamp
-        std::thread::sleep(Duration::from_micros(1));
         format!("{}\n", ts)
+        // format!("{}", ts)
     }
 
     pub fn append_timestamp(
@@ -598,6 +597,4 @@ impl InfluxDataPoint {
             self.set_and_append_timestamp();
         }
 
-        debug!("{} histogram point: {}", messages_direction, self.datapoint);
-    }
 }

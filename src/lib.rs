@@ -11,12 +11,6 @@ pub const API_TESTNET: &str = "https://api.testnet.solana.com";
 pub const INFLUX_INTERNAL_METRICS: &str = "https://internal-metrics.solana.com:8086";
 pub const INFLUX_LOCALHOST: &str = "http://localhost:8086";
 
-pub const VALIDATOR_STAKE_DISTRIBUTION_NUM_BUCKETS: u64 = 50; // for validator histogram
-pub const AGGREGATE_HOPS_FAIL_NODES_HISTOGRAM_UPPER_BOUND: f64 = 40.0;
-pub const AGGREGATE_HOPS_MIN_INGRESS_NODES_HISTOGRAM_UPPER_BOUND: u64 = 50;
-pub const STANDARD_HISTOGRAM_UPPER_BOUND: u64 = 30;
-
-
 pub mod gossip_stats;
 pub mod gossip;
 pub mod influx_db;
