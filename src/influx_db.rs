@@ -536,8 +536,8 @@ impl InfluxDataPoint {
                 median_iter_stranded={},\
                 mean_weighted_stake={},\
                 median_weighted_stake={} ", 
-                self.start_timestamp,
                 self.simulation_iteration,
+                self.start_timestamp,
                 total_stranded_iterations_count,
                 mean_number_of_iterations_node_stranded_for,
                 mean_number_of_nodes_stranded_during_each_iteration,
