@@ -723,6 +723,10 @@ fn main() {
 
     let start_timestamp = get_timestamp();
 
+    info!("############################################");
+    info!("##### START_TIME: {} ######", start_timestamp);
+    info!("############################################");
+
     let mut datapoint_queue: Option<Arc<Mutex<VecDeque<InfluxDataPoint>>>> = None;
     let mut influx_thread: Option<JoinHandle<()>> = None;
     let influx_type = matches
@@ -971,6 +975,9 @@ fn main() {
             warn!("WARNING: Gossip Stats Collection is empty. Is `Iterations` <= `warm-up-rounds`?");
         }
     }
+    info!("############################################");
+    info!("##### START_TIME: {} ######", start_timestamp);
+    info!("############################################");
 }
 
 #[cfg(test)]
