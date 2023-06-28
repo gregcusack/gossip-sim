@@ -121,7 +121,7 @@ pub struct Config<'a> {
     pub min_ingress_nodes: usize,
     pub filter_zero_staked_nodes: bool,
     pub num_buckets_for_stranded_node_hist: u64,
-    pub num_buckets_for_egress_message_hist: u64,
+    pub num_buckets_for_message_hist: u64,
     pub num_buckets_for_hops_stats_hist: u64,
     pub fraction_to_fail: f64,
     pub when_to_fail: usize,
@@ -183,7 +183,10 @@ pub struct Cluster {
     // vary with stake size. Also if we increase push_fanout, does that
     // increase egress count a ton?
     egress_message_count: HashMap<Pubkey, u64>,
-    // egress_message_count: EgressMessages_v2,
+    ingress_message_count: HashMap<Pubkey, u64>,
+
+    // count the number of prune messages sent by stake
+    prune_messages_sent: HashMap<Pubkey, u64>,
 }
 
 impl Cluster {
@@ -203,30 +206,8 @@ impl Cluster {
             failed_nodes: HashSet::new(),
             total_prunes: 0,
             egress_message_count: HashMap::default(),
-        }
-    }
-
-    pub fn new_with_stats(
-        push_fanout: usize,
-        stakes: &HashMap<Pubkey, u64>,
-    ) -> Self {
-        let mut counts: HashMap<Pubkey, u64> = HashMap::default();
-        for (pubkey, _) in stakes.iter() {
-            counts.insert(*pubkey, 0);
-        }
-        Cluster { 
-            gossip_push_fanout: push_fanout,
-            visited: HashSet::new(),
-            queue: VecDeque::new(),
-            distances: HashMap::new(),
-            orders: HashMap::new(),
-            mst: HashMap::new(),
-            prunes: HashMap::new(),
-            pushes: HashMap::new(),
-            rmr: RelativeMessageRedundancy::default(),
-            failed_nodes: HashSet::new(),
-            total_prunes: 0,
-            egress_message_count: counts,
+            ingress_message_count: HashMap::default(),
+            prune_messages_sent: HashMap::default(), 
         }
     }
 
@@ -243,6 +224,8 @@ impl Cluster {
         self.rmr.reset();
         self.total_prunes = 0;
         self.egress_message_count.clear();
+        self.ingress_message_count.clear();
+        self.prune_messages_sent.clear();
     }
 
     pub fn get_outbound_degree(
@@ -465,16 +448,36 @@ impl Cluster {
         &self.rmr
     }
 
-    pub fn clear_egress_message_count(
+    pub fn clear_message_counts(
         &mut self,
     ) {
-        self.egress_message_count.clear();
+        for (_, count) in self.egress_message_count.iter_mut() {
+            *count = 0;
+        }
+        for (_, count) in self.ingress_message_count.iter_mut() {
+            *count = 0;
+        }
+        for (_, count) in self.prune_messages_sent.iter_mut() {
+            *count = 0;
+        }
     }
 
     pub fn get_egress_messages(
         &self,
     ) -> &HashMap<Pubkey, u64> {
         &self.egress_message_count
+    }
+
+    pub fn get_ingress_messages(
+        &self,
+    ) -> &HashMap<Pubkey, u64> {
+        &self.ingress_message_count
+    }
+
+    pub fn get_prune_messages_sent(
+        &self,
+    ) -> &HashMap<Pubkey, u64> {
+        &self.prune_messages_sent
     }
 
     fn initialize(
@@ -552,10 +555,10 @@ impl Cluster {
                         .get_mut(&current_node_pubkey)
                         .unwrap() += 1;
 
-                    // if self.egress_message_count.initialized() {
-                    //     // add one to current_node egress_message_count
-                    //     self.egress_message_count.increment(&current_node_pubkey);
-                    // }
+                    let ingress_count = self.ingress_message_count
+                        .entry(*neighbor)
+                        .or_insert(0);
+                    *ingress_count += 1;
 
                     // Ensure the neighbor hasn't pruned us!
                     match self.prune_exists(neighbor, &current_node_pubkey) {
@@ -708,17 +711,26 @@ impl Cluster {
             if prunes.len() > 0 {
                 self.total_prunes += prunes.len();
             }
+            let prune_count = self.prune_messages_sent
+                .entry(*pruner)
+                .or_insert(0);
+
             for (current_pubkey, origins) in prunes {
                 // now we switch into the context of the prunee. 
                 // prunee now has to process the prune messages. so we do that here
                 // prunee is going to update it's active_set and remove the pruner 
                 // for the specific origin.
+
                 if let Some(current_node) = node_map.get(current_pubkey) {
                     debug!("For node {:?}, processing prune msg from {:?}", current_pubkey, pruner);
                     current_node.active_set.prune(current_pubkey, pruner, &origins[..], stakes);
                 } else {
-                    error!("ERROR. We should never reach here. all nodes in prunes_v2 should be in node_map");
+                    error!("ERROR. We should never reach here. all nodes in prunes should be in node_map");
                 }
+
+                // count prunes sent, not necessarily the individual prune messages sent out
+                // since in one prune message, we can prune a peer node for multiple origins
+                *prune_count += origins.len() as u64;
             }
         }
         trace!("total prunes: {}", self.total_prunes);

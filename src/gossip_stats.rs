@@ -357,13 +357,13 @@ impl StatCollection {
 // pass these buckets/counts as two different metrics to influx. 
 // grafana can then bar chart them
 #[derive(Debug, Clone)]
-pub struct EgressMessages {
+pub struct EgressIngressMessageTracker {
     counts: HashMap<Pubkey, u64>,
     count_per_bucket: Vec<u64>,
     histogram: Histogram,
 }
 
-impl Default for EgressMessages {
+impl Default for EgressIngressMessageTracker {
     fn default() -> Self {
         Self {
             counts: HashMap::default(),
@@ -373,7 +373,8 @@ impl Default for EgressMessages {
     }
 }
 
-impl EgressMessages {
+
+impl EgressIngressMessageTracker {
     // initialize entire counts map. want to include all nodes
     // when we build our histogram
     pub fn initialize_counts_map(
@@ -393,7 +394,7 @@ impl EgressMessages {
             let current_count = self.counts.get_mut(pubkey).unwrap();
             *current_count += *new_message_count;
         }
-    }
+    } 
 
     pub fn build_histogram(
         &mut self,
@@ -420,12 +421,12 @@ impl EgressMessages {
         )
     }
 
-    pub fn normalize_egress_message_counts(
+    pub fn normalize_message_counts(
         &mut self,
     ) {
         self.histogram
             .normalize_histogram(
-                &self.count_per_bucket
+                &self.count_per_bucket,
         );
     }
 
@@ -578,6 +579,8 @@ impl Histogram {
         num_buckets: u64,
         input_entries: &Vec<u64>,
     ) {
+        // TODO refactor with build_from_map put everything up to "for entry..." into
+        // own function and call it
         self.min_entry = lower_bound;
         self.max_entry = upper_bound;
         self.num_buckets = num_buckets;
@@ -602,7 +605,10 @@ impl Histogram {
             // Check if the entry is within the defined bounds
             if *entry >= self.min_entry && *entry <= self.max_entry {
                 // Determine the bucket index based on the entry value
-                let bucket = (entry - self.min_entry) / self.bucket_range;
+                let mut bucket = (entry - self.min_entry) / self.bucket_range;
+                if bucket == self.num_buckets {
+                    bucket -= 1;
+                }
 
                 // Increment the count for the bucket in the histogram
                 *self.entries.entry(bucket).or_insert(0) += 1;
@@ -646,7 +652,7 @@ impl Histogram {
                 let mut bucket: u64 = (*stake - self.min_entry) / self.bucket_range;
                 // info!("pubkey, stake, bucket, msgs: {:?}, {}, {}, {}", pubkey, stake, bucket, egress_messages);
                 if bucket == self.num_buckets {
-                    bucket = bucket - 1;
+                    bucket -= 1;
                 }
                 // add total egress messages to bucket entry.
                 // if bucket entry doesn't exist, begin it with the current egress_messages count
@@ -1229,7 +1235,10 @@ pub struct GossipStats {
     origin: Pubkey,
     pub simulation_parameters: SimulationParamaters,
     failed_nodes: HashSet<Pubkey>,
-    egress_messages: EgressMessages,
+    egress_messages: EgressIngressMessageTracker,
+    ingress_messages: EgressIngressMessageTracker,
+    validator_stake_distribution: Histogram,
+    prune_messages: EgressIngressMessageTracker,
 }
 
 impl Default for GossipStats {
@@ -1243,7 +1252,10 @@ impl Default for GossipStats {
             origin: Pubkey::default(),
             simulation_parameters: SimulationParamaters::default(),
             failed_nodes: HashSet::default(),
-            egress_messages: EgressMessages::default()
+            egress_messages: EgressIngressMessageTracker::default(),
+            ingress_messages: EgressIngressMessageTracker::default(),
+            validator_stake_distribution: Histogram::default(),
+            prune_messages: EgressIngressMessageTracker::default(),
         }
     }
 }
@@ -1720,48 +1732,73 @@ impl GossipStats {
         }
     }
 
-    pub fn update_egress_message_counts(
+    pub fn update_message_counts(
         &mut self,
-        new_messages: &HashMap<Pubkey, u64>,
+        new_egress_messages: &HashMap<Pubkey, u64>,
+        new_ingress_messages: &HashMap<Pubkey, u64>,
     ) {
-        self.egress_messages.update_message_counts(new_messages);
+        self.egress_messages.update_message_counts(new_egress_messages);
+        self.ingress_messages.update_message_counts(new_ingress_messages);
     }
 
-    pub fn build_egress_message_histogram(
+    pub fn update_prune_counts(
+        &mut self,
+        new_prune_messages: &HashMap<Pubkey, u64>,
+    ) {
+        self.prune_messages.update_message_counts(new_prune_messages);
+    }
+
+    pub fn build_message_histograms(
         &mut self,
         num_buckets: u64,
         normalize_histogram: bool,
         stakes: &HashMap<Pubkey, u64>,
     ) {
         self.egress_messages.build_histogram(num_buckets, stakes);
+        self.ingress_messages.build_histogram(num_buckets, stakes);
         if normalize_histogram {
-            self.egress_messages.normalize_egress_message_counts();
+            self.egress_messages.normalize_message_counts();
+            self.ingress_messages.normalize_message_counts();
         }
     }
 
-    pub fn initialize_egress_message_stats(
+    pub fn build_prune_histogram(
+        &mut self,
+        num_buckets: u64,
+        normalize_histogram: bool,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        self.prune_messages.build_histogram(num_buckets, stakes);
+        if normalize_histogram {
+            self.prune_messages.normalize_message_counts();
+        }
+    }
+
+    pub fn initialize_message_stats(
         &mut self,
         stakes: &HashMap<Pubkey, u64>
     ) {
-        self.egress_messages.initialize_counts_map(&stakes);
+        self.egress_messages.initialize_counts_map(stakes);
+        self.ingress_messages.initialize_counts_map(stakes);
+        self.prune_messages.initialize_counts_map(stakes);
     }
 
     pub fn get_egress_message_stats(
         &mut self,
-    ) -> &mut EgressMessages {
+    ) -> &mut EgressIngressMessageTracker {
         &mut self.egress_messages
-    }
-
-    pub fn clear_egress_message_count(
-        &mut self,
-    ) {
-        self.egress_messages.clear();
     }
 
     pub fn get_egress_messages_histogram(
         &self,
     ) -> &Histogram {
         self.egress_messages.get_histogram()
+    }
+
+    pub fn get_ingress_messages_histogram(
+        &self,
+    ) -> &Histogram {
+        self.ingress_messages.get_histogram()
     }
 
     pub fn print_egress_message_histogram(
@@ -1776,6 +1813,39 @@ impl GossipStats {
         for (index, count) in self.egress_messages.get_count_per_bucket().iter().enumerate() {
             info!("bucket index, count: {}, {}", index, count);
         }
+    }
+
+    pub fn get_prune_message_histogram(
+        &self,
+    ) -> &Histogram {
+        self.prune_messages.get_histogram()
+    }
+
+    pub fn build_validator_stake_distribution_histogram(
+        &mut self,
+        num_buckets: u64,
+        stakes: &HashMap<Pubkey, u64>,
+    ) {
+        let mut stakes_vec: Vec<u64> = stakes
+            .values()
+            .cloned()
+            .collect();
+
+        // sort by stake largest to smallest
+        stakes_vec.sort_by(|stake0, stake1| stake1.cmp(stake0));
+        
+        self.validator_stake_distribution.build(
+            stakes_vec[0], 
+            0, 
+            num_buckets, 
+            &stakes_vec,
+        )
+    }
+
+    pub fn get_validator_stake_distribution_histogram(
+        &self,
+    ) -> &Histogram {
+        &self.validator_stake_distribution
     }
 
     pub fn is_empty(
@@ -1909,7 +1979,6 @@ mod tests {
             collections::{HashMap},
         },
         solana_sdk::native_token::LAMPORTS_PER_SOL,
-        rand::rngs::StdRng,
     };
 
     pub fn calc_coverage(

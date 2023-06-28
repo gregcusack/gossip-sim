@@ -1,5 +1,5 @@
 use {
-    clap::{crate_description, crate_name, App, Arg, ArgMatches, value_t_or_exit},
+    clap::{crate_description, crate_name, App, Arg, ArgMatches, value_t_or_exit, values_t_or_exit},
     log::{error, info, debug, warn, Level},
     gossip_sim::{
         API_MAINNET_BETA,
@@ -33,11 +33,21 @@ use {
         env,
         sync::{Arc, Mutex},
         thread::JoinHandle,
+        time::{
+            SystemTime, 
+            UNIX_EPOCH, 
+        },
     },
     rand::rngs::StdRng,
     rand::SeedableRng,
     rayon::prelude::*,
     dotenv::dotenv,
+    gossip_sim::{
+        AGGREGATE_HOPS_FAIL_NODES_HISTOGRAM_UPPER_BOUND,
+        AGGREGATE_HOPS_MIN_INGRESS_NODES_HISTOGRAM_UPPER_BOUND,
+        STANDARD_HISTOGRAM_UPPER_BOUND,
+        VALIDATOR_STAKE_DISTRIBUTION_NUM_BUCKETS,
+    }
 };
 
 fn parse_matches() -> ArgMatches {
@@ -98,15 +108,13 @@ fn parse_matches() -> ArgMatches {
             Arg::with_name("origin_rank")
                 .long("origin-rank")
                 .takes_value(true)
+                .multiple_values(true)
                 .default_value("1")
-                .validator(|s| match s.parse::<usize>() {
-                    Ok(n) if n >= 1 => Ok(()),
-                    _ => Err(String::from("origin_rank must be at least 1")),
-                })
                 .help("Select an origin with origin rank for gossip.
                     e.g.    10 -> 10th largest stake
                             1000 -> 1000th largest stake
-                    Default is largest stake as origin"),
+                    Default is largest stake as origin
+                    Can pass in a list as well. Will iterate over all of them if test-type set"),
         )
         .arg(
             Arg::with_name("active_set_rotation_probability")
@@ -146,11 +154,11 @@ fn parse_matches() -> ArgMatches {
                 .help("Number of buckets for the stranded node histogram. see gossip_stats.rs"),
         )
         .arg(
-            Arg::with_name("num_buckets_for_egress_message_hist")
-                .long("num-buckets-egress")
+            Arg::with_name("num_buckets_for_message_hist")
+                .long("num-buckets-message")
                 .takes_value(true)
-                .default_value("100")
-                .help("Number of buckets for the egress message histogram. see gossip_stats.rs"),
+                .default_value("5")
+                .help("Number of buckets for the ingress/egress message histograms. see gossip_stats.rs"),
         )
         .arg(
             Arg::with_name("num_buckets_for_hops_stats_hist")
@@ -243,6 +251,14 @@ fn validate_testing(val: &str) -> Result<(), String> {
         .map_err(|_| "Invalid test type".to_string())
 }
 
+pub fn get_timestamp() -> String {
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+
+    format!("{}", ts)
+}
 
 pub fn initialize_gossip(
     // nodes: &[RwLock<Node>],
@@ -279,6 +295,7 @@ fn run_simulation(
     gossip_stats_collection: &mut GossipStatsCollection, 
     datapoint_queue: &Option<Arc<Mutex<VecDeque<InfluxDataPoint>>>>,
     simulation_iteration: usize,
+    start_timestamp: &String,
     start_value: f64,
 ) {
     info!("##### SIMULATION ITERATION: {} #####", simulation_iteration);
@@ -335,10 +352,30 @@ fn run_simulation(
         .map(|node| (node.pubkey(), node.stake()))
         .collect();
 
+    //collect vector of nodes
+    info!("Simulating Gossip and setting active sets. Please wait.....");
+    let _res = initialize_gossip(&mut nodes, &stakes, config.gossip_active_set_size).unwrap();
+    info!("Simulation Complete!");
+
+    let origin_node = find_nth_largest_node(config.origin_rank, &nodes).unwrap();
+    let origin_pubkey = &origin_node.pubkey();
+
+    let mut stats = GossipStats::default();
+    stats.set_simulation_parameters(config);
+    stats.set_origin(*origin_pubkey);
+    stats.initialize_message_stats(&stakes);
+    stats.build_validator_stake_distribution_histogram(
+        VALIDATOR_STAKE_DISTRIBUTION_NUM_BUCKETS, 
+        &stakes
+    );
+
     if simulation_iteration == 0 {
         match datapoint_queue {
             Some(ref dp_queue) => {
-                let mut datapoint = InfluxDataPoint::default();
+                let mut datapoint = InfluxDataPoint::new(
+                    start_timestamp,
+                    simulation_iteration
+                );
                 let mut start = start_value.to_string();
                 if config.test_type == Testing::NoTest {
                     start = "N/A".to_string();
@@ -354,29 +391,19 @@ fn run_simulation(
                     start,
                     config.test_type,
                 );
+
+                datapoint.create_validator_stake_distribution_histogram_point(
+                    stats.get_validator_stake_distribution_histogram()
+                );
+
                 dp_queue.lock().unwrap().push_back(datapoint);
+
             }
             _ => { }
         }
     }
-    
-    //collect vector of nodes
-    info!("Simulating Gossip and setting active sets. Please wait.....");
-    let _res = initialize_gossip(&mut nodes, &stakes, config.gossip_active_set_size).unwrap();
-    info!("Simulation Complete!");
 
-    let origin_node = find_nth_largest_node(config.origin_rank, &nodes).unwrap();
-    let origin_pubkey = &origin_node.pubkey();
-
-    let mut stats = GossipStats::default();
-    stats.set_simulation_parameters(config);
-    stats.set_origin(*origin_pubkey);
-    stats.initialize_egress_message_stats(&stakes);
-
-    let mut cluster: Cluster = Cluster::new_with_stats(
-        config.gossip_push_fanout,
-        &stakes,
-    );
+    let mut cluster: Cluster = Cluster::new(config.gossip_push_fanout);
 
     info!("ORIGIN: {:?}", origin_pubkey);
     let mut _number_of_poor_coverage_runs: usize = 0;
@@ -384,7 +411,10 @@ fn run_simulation(
 
     match datapoint_queue {
         Some(dp_queue) => {
-            let mut datapoint = InfluxDataPoint::default();
+            let mut datapoint = InfluxDataPoint::new(
+                start_timestamp,
+                simulation_iteration
+            );
             datapoint.set_start();
             dp_queue.lock().unwrap().push_back(datapoint);
         }
@@ -397,7 +427,10 @@ fn run_simulation(
             info!("GOSSIP ITERATION: {}", gossip_iteration);
             match datapoint_queue {
                 Some(dp_queue) => {
-                    let mut datapoint = InfluxDataPoint::new(simulation_iteration);
+                    let mut datapoint = InfluxDataPoint::new(
+                        start_timestamp,
+                        simulation_iteration
+                    );
                     datapoint.create_config_point(
                         config.gossip_push_fanout,
                         config.gossip_active_set_size,
@@ -439,6 +472,10 @@ fn run_simulation(
 
         cluster.chance_to_rotate(&mut nodes, config.gossip_active_set_size, &stakes, config.probability_of_rotation);
 
+        if gossip_iteration + 1 == config.warm_up_rounds {
+            cluster.clear_message_counts();
+        }
+
         // wait until after warmup rounds to begin calculating gossip stats and reporting to influx
         if gossip_iteration >= config.warm_up_rounds {
             // don't care about gossip_iteration 0->warm_up_rounds.
@@ -467,13 +504,21 @@ fn run_simulation(
 
             stats.calculate_outbound_branching_factor(cluster.get_pushes());
 
-            stats.update_egress_message_counts(
-                cluster.get_egress_messages()
+            stats.update_message_counts(
+                cluster.get_egress_messages(),
+                cluster.get_ingress_messages()
+            );
+
+            stats.update_prune_counts(
+                cluster.get_prune_messages_sent(),
             );
 
             match datapoint_queue {
                 Some(dp_queue) => {
-                    let mut datapoint = InfluxDataPoint::new(simulation_iteration);
+                    let mut datapoint = InfluxDataPoint::new(
+                        start_timestamp,
+                        simulation_iteration
+                    );
                     match cluster.relative_message_redundancy() {
                         Ok(result) => {
                             stats.insert_rmr(result.0);
@@ -527,28 +572,32 @@ fn run_simulation(
         );
         if config.test_type == Testing::FailNodes {
             stats.build_aggregate_hops_stats_histogram(
-                (40.0 * (1.0 + config.fraction_to_fail)) as u64,
+                (AGGREGATE_HOPS_FAIL_NODES_HISTOGRAM_UPPER_BOUND * (1.0 + config.fraction_to_fail)) as u64,
                     0,
                     config.num_buckets_for_hops_stats_hist // 25  
             );
         } else if config.test_type == Testing::MinIngressNodes {
             stats.build_aggregate_hops_stats_histogram(
-                50,
-                    0,
-                    config.num_buckets_for_hops_stats_hist //25
+                AGGREGATE_HOPS_MIN_INGRESS_NODES_HISTOGRAM_UPPER_BOUND,
+                0,
+                config.num_buckets_for_hops_stats_hist //25
             );
         } else {
-            stats.build_aggregate_hops_stats_histogram(30, 0, config.num_buckets_for_hops_stats_hist);
+            stats.build_aggregate_hops_stats_histogram(STANDARD_HISTOGRAM_UPPER_BOUND, 0, config.num_buckets_for_hops_stats_hist);
         }
 
-        stats.build_egress_message_histogram(config.num_buckets_for_egress_message_hist, true, &stakes);
+        stats.build_message_histograms(config.num_buckets_for_message_hist, true, &stakes);
+        stats.build_prune_histogram(config.num_buckets_for_message_hist, true, &stakes);
 
         stats.run_all_calculations();
         gossip_stats_collection.push(stats.clone());
 
         match datapoint_queue {
             Some(dp_queue) => {
-                let mut datapoint = InfluxDataPoint::new(simulation_iteration);
+                let mut datapoint = InfluxDataPoint::new(
+                    start_timestamp,
+                    simulation_iteration
+                );
                 let data = stats.get_stranded_node_iteration_data();
                 datapoint.create_stranded_iteration_point(
                     data.0,
@@ -571,8 +620,21 @@ fn run_simulation(
                 );
 
                 // TODO: refactor. should be stat.get_egress_messages();
-                datapoint.create_egress_messages_point(
+                datapoint.create_messages_point(
+                    "egress_message_count".to_string(),
                     stats.get_egress_messages_histogram(),
+                    simulation_iteration
+                );
+
+                datapoint.create_messages_point(
+                    "ingress_message_count".to_string(),
+                    stats.get_ingress_messages_histogram(),
+                    simulation_iteration
+                );
+
+                datapoint.create_messages_point(
+                    "prune_message_count".to_string(),
+                    stats.get_prune_message_histogram(),
                     simulation_iteration
                 );
 
@@ -591,13 +653,15 @@ fn main() {
     solana_logger::setup();
 
     let matches = parse_matches();
+
+    let origin_ranks: Vec<usize> = values_t_or_exit!(matches, "origin_rank", usize);
     let config = Config {
         gossip_push_fanout: value_t_or_exit!(matches, "gossip_push_fanout", usize),
         gossip_active_set_size: value_t_or_exit!(matches, "gossip_push_active_set_entry_size", usize),
         gossip_iterations: value_t_or_exit!(matches, "gossip_iterations", usize),
         accounts_from_file: matches.is_present("accounts_from_yaml"),
         account_file: matches.value_of("account_file").unwrap_or_default(),
-        origin_rank: value_t_or_exit!(matches, "origin_rank", usize),
+        origin_rank: origin_ranks[0],
         probability_of_rotation: value_t_or_exit!(matches, "active_set_rotation_probability", f64),
         prune_stake_threshold: value_t_or_exit!(matches, "prune_stake_threshold", f64), 
         min_ingress_nodes: value_t_or_exit!(matches, "min_ingress_nodes", usize),
@@ -605,7 +669,7 @@ fn main() {
         when_to_fail: value_t_or_exit!(matches, "when_to_fail", usize),
         filter_zero_staked_nodes: matches.is_present("remove_zero_staked_nodes"),
         num_buckets_for_stranded_node_hist: value_t_or_exit!(matches, "num_buckets_for_stranded_node_hist", u64),
-        num_buckets_for_egress_message_hist: value_t_or_exit!(matches, "num_buckets_for_egress_message_hist", u64),
+        num_buckets_for_message_hist: value_t_or_exit!(matches, "num_buckets_for_message_hist", u64),
         num_buckets_for_hops_stats_hist: value_t_or_exit!(matches, "num_buckets_for_hops_stats_hist", u64),
         test_type: matches
                     .value_of("test_type")
@@ -639,15 +703,37 @@ fn main() {
         print_stats: matches.is_present("print_stats"),
     };
 
+    if origin_ranks.len() < config.num_simulations {
+        error!("ERROR: not enough origin ranks provided for num_simulations! origin_ranks.len(): {}, \
+            num_simulations: {}", origin_ranks.len(), config.num_simulations);
+            return;
+    } else if origin_ranks.len() > config.num_simulations {
+        warn!("WARNING: more origin ranks than number of simulations. Not going to hit all origin ranks");
+    } else if origin_ranks.len() > 1 && config.test_type != Testing::OriginRank {
+        error!("ERROR: multiple origin_ranks passed in but test type is not OriginRank. \
+            This would end up running all simulations with origin_rank[0]: {}", origin_ranks[0]);
+        return;
+    }
+
     if config.gossip_iterations <= config.warm_up_rounds {
         warn!("WARNING: Gossip Iterations ({}) <= Warm Up Rounds ({}). No stats will be recorded....", 
             config.gossip_iterations, 
             config.warm_up_rounds);
     }
 
+    let start_timestamp = get_timestamp();
+
+    info!("############################################");
+    info!("##### START_TIME: {} ######", start_timestamp);
+    info!("############################################");
+
     let mut datapoint_queue: Option<Arc<Mutex<VecDeque<InfluxDataPoint>>>> = None;
     let mut influx_thread: Option<JoinHandle<()>> = None;
-    let influx_type = matches.value_of("influx").unwrap_or_default().to_string().clone();
+    let influx_type = matches
+        .value_of("influx")
+        .unwrap_or_default()
+        .to_string()
+        .clone();
     
     if influx_type == "l".to_string() || influx_type == "i".to_string() {
         datapoint_queue = Some(Arc::new(Mutex::new(VecDeque::new())));
@@ -704,6 +790,7 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     initial_active_set_size as f64,
                 );
             }
@@ -730,6 +817,7 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     initial_push_fanout as f64,
                 );            
             }
@@ -753,6 +841,7 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     min_ingress_nodes as f64,
                 );           
              }
@@ -775,16 +864,14 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     initial_prune_stake_threshold as f64,
                 );            
             }
         }
         Testing::OriginRank => {
-            let step_size: usize = config.step_size.into();
-            let initial_origin_rank = config.origin_rank;
-
             for i in 0..config.num_simulations {
-                let origin_rank = initial_origin_rank + (i * step_size);
+                let origin_rank = origin_ranks[i];
 
                 // Update the active_set_size in the config for each experiment
                 let mut config = config.clone();
@@ -797,6 +884,7 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     origin_rank as f64,
                 );            
             }
@@ -819,6 +907,7 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     initial_fraction_to_fail as f64,
                 );           
             }
@@ -841,6 +930,7 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     intial_rotate_probability as f64,
                 );           
             }
@@ -853,6 +943,7 @@ fn main() {
                     &mut gossip_stats_collection, 
                     &datapoint_queue, 
                     i, 
+                    &start_timestamp,
                     0 as f64,
                 );            
             }
@@ -884,8 +975,9 @@ fn main() {
             warn!("WARNING: Gossip Stats Collection is empty. Is `Iterations` <= `warm-up-rounds`?");
         }
     }
-
-
+    info!("############################################");
+    info!("##### START_TIME: {} ######", start_timestamp);
+    info!("############################################");
 }
 
 #[cfg(test)]
