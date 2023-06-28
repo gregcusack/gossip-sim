@@ -394,7 +394,7 @@ impl EgressIngressMessageTracker {
             let current_count = self.counts.get_mut(pubkey).unwrap();
             *current_count += *new_message_count;
         }
-    }
+    } 
 
     pub fn build_histogram(
         &mut self,
