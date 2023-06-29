@@ -703,13 +703,15 @@ fn main() {
         print_stats: matches.is_present("print_stats"),
     };
 
-    if origin_ranks.len() < config.num_simulations {
-        error!("ERROR: not enough origin ranks provided for num_simulations! origin_ranks.len(): {}, \
-            num_simulations: {}", origin_ranks.len(), config.num_simulations);
+    if config.test_type == Testing::OriginRank {
+        if origin_ranks.len() < config.num_simulations {
+            error!("ERROR: not enough origin ranks provided for num_simulations! origin_ranks.len(): {}, \
+                num_simulations: {}", origin_ranks.len(), config.num_simulations);
             return;
-    } else if origin_ranks.len() > config.num_simulations {
-        warn!("WARNING: more origin ranks than number of simulations. Not going to hit all origin ranks");
-    } else if origin_ranks.len() > 1 && config.test_type != Testing::OriginRank {
+        } else if origin_ranks.len() > config.num_simulations {
+            warn!("WARNING: more origin ranks than number of simulations. Not going to hit all origin ranks");
+        }
+    } else if origin_ranks.len() > 1 {
         error!("ERROR: multiple origin_ranks passed in but test type is not OriginRank. \
             This would end up running all simulations with origin_rank[0]: {}", origin_ranks[0]);
         return;
