@@ -746,7 +746,7 @@ impl Cluster {
     ) {
         nodes.par_iter_mut().for_each(|node| {
             let mut chance_rng = StdRng::from_entropy();
-            if chance_rng.gen::<f64>() < probability_of_rotation {
+            if !node.failed() && chance_rng.gen::<f64>() < probability_of_rotation {
                 trace!("Rotating Active Set for: {:?}", node.pubkey());
                 node.rotate_active_set(&mut chance_rng, active_set_size, stakes, false);
             }
