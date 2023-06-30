@@ -423,7 +423,7 @@ fn run_simulation(
 
     info!("Calculating the MSTs for origin: {:?}, stake: {}", origin_pubkey, stakes.get(origin_pubkey).unwrap());
     for gossip_iteration in 0..config.gossip_iterations {
-        if gossip_iteration % 10 == 0 {
+        if gossip_iteration % 1 == 0 {
             info!("GOSSIP ITERATION: {}", gossip_iteration);
             match datapoint_queue {
                 Some(dp_queue) => {
@@ -483,7 +483,7 @@ fn run_simulation(
             // this is essentially our steady state  
             let steady_state_iteration = gossip_iteration - config.warm_up_rounds;
             let (coverage, stranded_nodes) = cluster.coverage(&stakes);
-            debug!("For origin {:?}, the cluster coverage is: {:.6}", origin_pubkey, coverage);
+            info!("For origin {:?}, the cluster coverage is: {:.6}. {}/{}", origin_pubkey, coverage, cluster.get_visited_len(), nodes.len());
             debug!("{} nodes are stranded out of {} nodes", stranded_nodes, nodes.len());
             if coverage < poor_coverage_threshold {
                 warn!("WARNING: poor coverage for origin: {:?}, {}", origin_pubkey, coverage);
@@ -562,6 +562,7 @@ fn run_simulation(
                 }
             }
         }
+        info!("NUM FAILED NODES: {}", cluster.get_failed_nodes_v2_len());
     }
 
     if !stats.is_empty() {
@@ -713,7 +714,7 @@ fn main() {
         }
     } else if origin_ranks.len() > 1 {
         error!("ERROR: multiple origin_ranks passed in but test type is not OriginRank. \
-            This would end up running all simulations with origin_rank[0]: {}", origin_ranks[0]);
+                This would end up running all simulations with origin_rank[0]: {}", origin_ranks[0]);
         return;
     }
 

@@ -187,6 +187,9 @@ pub struct Cluster {
 
     // count the number of prune messages sent by stake
     prune_messages_sent: HashMap<Pubkey, u64>,
+
+    // keep track of failed nodes
+    failed_nodes_v2: HashSet<Pubkey>,
 }
 
 impl Cluster {
@@ -208,6 +211,7 @@ impl Cluster {
             egress_message_count: HashMap::default(),
             ingress_message_count: HashMap::default(),
             prune_messages_sent: HashMap::default(), 
+            failed_nodes_v2: HashSet::default(),
         }
     }
 
@@ -348,6 +352,12 @@ impl Cluster {
         &self,
     ) -> &HashMap<Pubkey, u64> {
         &self.distances
+    }
+
+    pub fn get_failed_nodes_v2_len(
+        &self,
+    ) -> usize {
+        self.failed_nodes_v2.len()
     }
 
     pub fn get_failed_nodes(
@@ -521,6 +531,22 @@ impl Cluster {
 
             self.egress_message_count.insert(current_node_pubkey, 0);
 
+            // // don't fail origin node
+            // if current_node_pubkey != *origin_pubkey {
+            //     if !self.failed_nodes_v2.contains(&current_node_pubkey) {
+            //         let chance_to_fail = 0.0001;
+            //         let mut chance_rng = StdRng::from_entropy();
+            //         if chance_rng.gen::<f64>() < chance_to_fail {
+            //             info!("Failing current node: {:?}", current_node_pubkey);
+            //             self.failed_nodes_v2.insert(current_node_pubkey);
+            //             continue;
+            //         }    
+            //     } else {
+            //         info!("node is failed, continue");
+            //         continue;
+            //     }
+            // }
+
             // For each peer of the current node's PASE (limit PUSH_FANOUT), 
             // update its distance and add it to the queue if it has not been visited
             let mut pase_counter: usize = 0;
@@ -535,12 +561,20 @@ impl Cluster {
                 .take(self.gossip_push_fanout)
                 .enumerate() {
 
-                    let chance_to_fail = 0.1;
-                    let mut chance_rng = StdRng::from_entropy();
-                    if chance_rng.gen::<f64>() < chance_to_fail {
-                        info!("Failing node: {:?}", neighbor);
+                    // check if node is failed, if so, continue. if not, check if it is going to be failed
+                    if !self.failed_nodes_v2.contains(neighbor) {
+                        let chance_to_fail = 0.00001;
+                        let mut chance_rng = StdRng::from_entropy();
+                        if chance_rng.gen::<f64>() < chance_to_fail {
+                            // info!("Failing node: {:?}", neighbor);
+                            self.failed_nodes_v2.insert(*neighbor);
+                            continue;
+                        }
+                    } else {
+                        // info!("Node is already failed: {:?}", neighbor);
                         continue;
                     }
+                    
 
                     // check if node has failed. if it is, we do process this neighbor node.
                     if node_map.get(neighbor).unwrap().failed() {
