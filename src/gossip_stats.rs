@@ -2119,7 +2119,7 @@ mod tests {
                     .iter()
                     .map(|node| (node.pubkey(), node))
                     .collect();
-                cluster.run_gossip(origin_pubkey, &stakes, &node_map);
+                cluster.run_gossip(origin_pubkey, &stakes, &node_map, false);
             }
 
             match cluster.relative_message_redundancy() {

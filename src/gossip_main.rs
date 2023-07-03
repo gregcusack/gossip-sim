@@ -87,7 +87,7 @@ fn parse_matches() -> ArgMatches {
             Arg::with_name("gossip_push_fanout")
                 .long("push-fanout")
                 .takes_value(true)
-                .default_value("6")
+                .default_value("9")
                 .help("gossip push fanout"),
         )
         .arg(
@@ -420,7 +420,7 @@ fn run_simulation(
         }
         _ => { }
     } 
-
+    let mut begin_fail = false;
     info!("Calculating the MSTs for origin: {:?}, stake: {}", origin_pubkey, stakes.get(origin_pubkey).unwrap());
     for gossip_iteration in 0..config.gossip_iterations {
         if gossip_iteration % 1 == 0 {
@@ -445,10 +445,11 @@ fn run_simulation(
                 _ => { }
             }
         }
-            
+        
         if config.test_type == Testing::FailNodes && gossip_iteration == config.when_to_fail {
-            cluster.fail_nodes(config.fraction_to_fail, &mut nodes);
-            stats.set_failed_nodes(cluster.get_failed_nodes());
+            begin_fail = true;
+            // cluster.fail_nodes(config.fraction_to_fail, &mut nodes);
+            // stats.set_failed_nodes(cluster.get_failed_nodes());
         }
         
         {
@@ -456,7 +457,8 @@ fn run_simulation(
                 .iter()
                 .map(|node| (node.pubkey(), node))
                 .collect();
-            cluster.run_gossip(origin_pubkey, &stakes, &node_map);
+            let mut node_vec: Vec<Pubkey> = node_map.keys().cloned().collect();
+            cluster.run_gossip(origin_pubkey, &stakes, &node_map, begin_fail, &mut node_vec);
         }
 
         cluster.consume_messages(origin_pubkey, &mut nodes);

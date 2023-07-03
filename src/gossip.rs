@@ -27,6 +27,9 @@ use {
     rayon::prelude::*, 
 };
 
+pub const FAIL_NODES_AFTER_THIS_ITER: usize = 34;
+pub const FRACTION_OF_NODES_TO_FAIL: f64 = 0.05;
+
 #[cfg_attr(test, cfg(test))]
 pub(crate) const CRDS_UNIQUE_PUBKEY_CAPACITY: usize = 8192;
 
@@ -190,6 +193,8 @@ pub struct Cluster {
 
     // keep track of failed nodes
     failed_nodes_v2: HashSet<Pubkey>,
+
+    total_nodes_to_fail: usize,
 }
 
 impl Cluster {
@@ -212,6 +217,7 @@ impl Cluster {
             ingress_message_count: HashMap::default(),
             prune_messages_sent: HashMap::default(), 
             failed_nodes_v2: HashSet::default(),
+            total_nodes_to_fail: 0,
         }
     }
 
@@ -506,6 +512,8 @@ impl Cluster {
         origin_pubkey: &Pubkey,
         stakes: &HashMap<Pubkey, u64>,
         node_map: &HashMap<Pubkey, &Node>,
+        begin_fail: bool,
+        nodes: &mut Vec<Pubkey>,
     ) {
 
         //initialize BFS setup
@@ -516,6 +524,16 @@ impl Cluster {
         self.queue.push_back(*origin_pubkey);
         self.visited.insert(*origin_pubkey);
         self.rmr.increment_n(); // add origin to rmr node count
+        
+        // let mut total_iter_count: usize: 0;
+        let mut iteration_count: usize = 0;
+        let mut sum: usize = 0;
+        let mut node_count: usize = 0;
+        let mut fail_counter: usize = 0;
+
+        if self.total_nodes_to_fail == 0 {
+            self.get_nodes_to_fail(FRACTION_OF_NODES_TO_FAIL, nodes);
+        }
 
         // going through BFS
         while !self.queue.is_empty() {
@@ -531,20 +549,48 @@ impl Cluster {
 
             self.egress_message_count.insert(current_node_pubkey, 0);
 
-            // // don't fail origin node
-            // if current_node_pubkey != *origin_pubkey {
-            //     if !self.failed_nodes_v2.contains(&current_node_pubkey) {
-            //         let chance_to_fail = 0.0001;
-            //         let mut chance_rng = StdRng::from_entropy();
-            //         if chance_rng.gen::<f64>() < chance_to_fail {
-            //             info!("Failing current node: {:?}", current_node_pubkey);
-            //             self.failed_nodes_v2.insert(current_node_pubkey);
-            //             continue;
-            //         }    
-            //     } else {
-            //         info!("node is failed, continue");
+            if self.failed_nodes_v2.contains(&current_node_pubkey) {
+                continue;
+            }
+            if iteration_count == FAIL_NODES_AFTER_THIS_ITER {
+                info!("{}, {}, {}, {}", begin_fail, iteration_count, self.failed_nodes_v2.len(), self.total_nodes_to_fail);
+            }
+
+            if begin_fail && iteration_count > FAIL_NODES_AFTER_THIS_ITER && self.failed_nodes_v2.len() < self.total_nodes_to_fail {
+                self.failed_nodes_v2.insert(current_node_pubkey);
+                fail_counter += 1;
+                info!("failed a node!");
+                continue;
+            }
+
+            // if begin_fail && iteration_count > 81 && fail_counter < self.total_nodes_to_fail {//} && self.failed_nodes_v2.is_empty() {
+            //     if self.total_nodes_to_fail != self.failed_nodes_v2.len() {
+            //         self.failed_nodes_v2.insert(current_node_pubkey);
+            //         fail_counter += 1;
+            //         info!("failed a node!");
             //         continue;
             //     }
+            // } else if fail_counter == self.total_nodes_to_fail && fail_counter != 0 {
+            //     info!("failing nodes complete. failed {} nodes", fail_counter);
+            //     fail_counter += 1; //just so we don't enter this else if again
+            // }
+
+            // if begin_fail && iteration_count > 81 && self.failed_nodes_v2.is_empty() {
+            //     self.fail_nodes_v2(0.01, nodes);
+            //     info!("failed {} nodes", self.failed_nodes_v2.len());
+            //     // if !self.failed_nodes_v2.contains(&current_node_pubkey) {
+            //     //     let chance_to_fail = 0.00005;
+            //     //     let mut chance_rng = StdRng::from_entropy();
+            //     //     if chance_rng.gen::<f64>() < chance_to_fail {
+            //     //         info!("Failing node: {:?}, iter count: {}", current_node_pubkey, iteration_count);
+            //     //         self.failed_nodes_v2.insert(current_node_pubkey);
+
+            //     //         continue;
+            //     //     } 
+            //     // } else {
+            //     //     info!("Node is already failed: {:?}, iteration_count: {}", current_node_pubkey, iteration_count);
+            //     //     continue;
+            //     // }
             // }
 
             // For each peer of the current node's PASE (limit PUSH_FANOUT), 
@@ -561,17 +607,21 @@ impl Cluster {
                 .take(self.gossip_push_fanout)
                 .enumerate() {
 
-                    // check if node is failed, if so, continue. if not, check if it is going to be failed
-                    if !self.failed_nodes_v2.contains(neighbor) {
-                        let chance_to_fail = 0.00001;
-                        let mut chance_rng = StdRng::from_entropy();
-                        if chance_rng.gen::<f64>() < chance_to_fail {
-                            // info!("Failing node: {:?}", neighbor);
-                            self.failed_nodes_v2.insert(*neighbor);
-                            continue;
-                        }
-                    } else {
-                        // info!("Node is already failed: {:?}", neighbor);
+                    // // check if node is failed, if so, continue. if not, check if it is going to be failed
+                    // if !self.failed_nodes_v2.contains(neighbor) {
+                    //     let chance_to_fail = 0.00001;
+                    //     let mut chance_rng = StdRng::from_entropy();
+                    //     if chance_rng.gen::<f64>() < chance_to_fail {
+                    //         // info!("Failing node: {:?}", neighbor);
+                    //         self.failed_nodes_v2.insert(*neighbor);
+                    //         continue;
+                    //     }
+                    // } else {
+                    //     // info!("Node is already failed: {:?}", neighbor);
+                    //     continue;
+                    // }
+
+                    if self.failed_nodes_v2.contains(neighbor) {
                         continue;
                     }
                     
@@ -653,7 +703,21 @@ impl Cluster {
                 debug!("for src_node {:?}", current_node_pubkey);
                 debug!("WARNING: Only pushed to {} nodes instead of the expected {} nodes!", pase_counter + 1, self.gossip_push_fanout);
             }
+
+
+            if iteration_count > (FAIL_NODES_AFTER_THIS_ITER - 10) && iteration_count < (FAIL_NODES_AFTER_THIS_ITER + 10) {
+                info!("node has {} neighbors", pase_counter + 1);
+                sum += pase_counter + 1;
+                node_count += 1;
+                // info!("pase, count: {}, {}", sum, node_count);
+            }
+            if iteration_count == (FAIL_NODES_AFTER_THIS_ITER + 10) {
+                info!("mean pase count: {}", sum as f64 / node_count as f64 );
+            }
+            iteration_count += 1;
         }
+        info!("total iterations: {}, failed nodes: {}", iteration_count, self.failed_nodes_v2.len());
+        // info!
     }
 
     // loop through orders map and add incoming messages to our receive cache
@@ -810,6 +874,40 @@ impl Cluster {
             self.failed_nodes.insert(nodes[i].pubkey());
         }
         info!("Total nodes failed: {}", total_nodes_to_fail);
+    }
+
+    pub fn get_nodes_to_fail(
+        &mut self,
+        fraction_to_fail: f64,
+        nodes: &mut Vec<Pubkey>,
+    ) {
+        self.total_nodes_to_fail = (fraction_to_fail * nodes.len() as f64) as usize
+        // info!("total nodes to fail: ")
+    }
+
+    pub fn fail_nodes_v2(
+        &mut self,
+        fraction_to_fail: f64,
+        nodes: &mut Vec<Pubkey>,
+    ) {
+        self.get_nodes_to_fail(fraction_to_fail, nodes);
+
+        info!("total_nodes_to_fail: {}", self.total_nodes_to_fail);
+
+        let mut rng = rand::thread_rng();
+        // let mut nodes_copy = nodes.clone();
+        nodes.shuffle(&mut rng);
+        
+        let mut count = 0;
+
+        while count < self.total_nodes_to_fail {
+            // nodes[i].fail_node();
+            if !self.visited.contains(&nodes[count]) {
+                self.failed_nodes_v2.insert(nodes[count]);
+                count += 1;
+            }
+        }
+        info!("Total nodes failed: {}", count);
     }
 }
 
@@ -1115,7 +1213,7 @@ mod tests {
 
         let mut cluster: Cluster = Cluster::new(PUSH_FANOUT);
         let origin_pubkey = &pubkey; //just a temp origin selection
-        cluster.run_gossip(origin_pubkey, &stakes, &node_map);
+        cluster.run_gossip(origin_pubkey, &stakes, &node_map, false);
 
         // verify buckets
         let mut keys = stakes.keys().cloned().collect::<Vec<_>>();
